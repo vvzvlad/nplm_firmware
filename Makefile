@@ -20,7 +20,7 @@ clean:
 
 install_env:
 	arduino-cli core update-index --additional-urls http://arduino.esp8266.com/stable/package_esp8266com_index.json
-	arduino-cli core install esp8266:esp8266 --additional-urls http://arduino.esp8266.com/stable/package_esp8266com_index.jsonды
+	arduino-cli core install esp8266:esp8266 --additional-urls http://arduino.esp8266.com/stable/package_esp8266com_index.json
 #	arduino-cli lib install "WiFiManager"
 #	arduino-cli lib install "ArduinoJson"
 #	arduino-cli lib install "EspMQTTClient"
