@@ -81,19 +81,19 @@ void make_graph() {
 		if (graph_values[i] > 50) {graph_values[i] = 50;}
 	}
 
-	tft.fillRoundRect(0, 110, 128, 110+50, 0, ST7735_TFT_BLACK);
+	//tft.fillRoundRect(0, 110, 128, 110+50, 0, ST7735_TFT_BLACK);
 	//tft.fillScreen(ST7735_TFT_BLACK);
 
 	for (uint8_t col=0; col < 128; col++) {
 		if (col == 0) {
-			//tft.drawPixel(col, 160-old_graph_values[col], ST7735_TFT_BLACK);
+			tft.drawPixel(col, 160-old_graph_values[col], ST7735_TFT_BLACK);
 			tft.drawPixel(col, 160-graph_values[col], ST7735_TFT_GREEN);
 		}
 		else {
-			//tft.drawLine(col-1, 160-old_graph_values[col-1], col, 160-old_graph_values[col], ST7735_TFT_BLACK);
+			tft.fillRect(col-1-1, 160-old_graph_values[col-1]-1, col+1, 160-old_graph_values[col]+1, ST7735_TFT_BLACK);
 			tft.drawLine(col-1, 160-graph_values[col-1], col, 160-graph_values[col], ST7735_TFT_GREEN);
 		}
-		//old_graph_values[col] = graph_values[col];
+		old_graph_values[col] = graph_values[col];
 
 	}
 
@@ -240,7 +240,7 @@ void setup(void) {
 	//get_adc_correction_value();
 
 	//ts.add(0, 2000, [&](void *) { measure_light(); }, nullptr, true);
-	//ts.add(1, 2000, [&](void *) { get_adc(); }, nullptr, true);
+	ts.add(1, 200, [&](void *) { get_adc(); }, nullptr, true);
 
 
 }
