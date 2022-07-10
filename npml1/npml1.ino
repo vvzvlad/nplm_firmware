@@ -195,10 +195,10 @@ void get_adc() {
 	}
 
 	//Дебаг вывод для подсчета частота
-	uint16_t adc_mean_values_t[MEASURE_NUM_SAMPLES];
-	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-		adc_mean_values_t[i] = 0;
-	}
+	uint16_t adc_mean_values_t[MEASURE_NUM_SAMPLES] = {};
+	//for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
+	//	adc_mean_values_t[i] = 0;
+	//}
 	Serial.print("adc_mean_values:\n");
 	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
 		Serial.print(adc_mean_values_t[i]);
