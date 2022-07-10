@@ -43,7 +43,7 @@ TickerScheduler ts(5);
 
 #define MAX_FREQ 300
 
-uint16_t adc_values[MEASURE_NUM_SAMPLES];
+uint16_t adc_values[MEASURE_NUM_SAMPLES] = {};
 
 uint16_t adc_values_correction = 0;
 
@@ -63,7 +63,7 @@ void get_adc_correction_value() {
 
 
 void make_graph() {
-	uint8_t graph_values[graph_width];
+	uint8_t graph_values[graph_width] = {};
 
 	uint16_t adc_values_max = 0;
 	uint8_t adc_values_multiplier = 0;
@@ -173,7 +173,7 @@ void get_adc() {
 
 
 	//Frequency counting
-	uint16_t adc_mean_values[MEASURE_NUM_SAMPLES];
+	uint16_t adc_mean_values[MEASURE_NUM_SAMPLES] = {};
 	uint16_t adc_mean_values_i = 0;
 	uint16_t adc_mean_values_last_value = adc_values[0];
 	uint16_t adc_mean_values_last_number = MEASURE_NUM_SAMPLES;
@@ -194,14 +194,10 @@ void get_adc() {
 		adc_mean_values_last_value = adc_values[i];
 	}
 
-	//Дебаг вывод для подсчета частота
-	uint16_t adc_mean_values_t[MEASURE_NUM_SAMPLES] = {};
-	//for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-	//	adc_mean_values_t[i] = 0;
-	//}
+	//Дебаг вывод для подсчета частоты
 	Serial.print("adc_mean_values:\n");
 	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-		Serial.print(adc_mean_values_t[i]);
+		Serial.print(adc_mean_values[i]);
 		Serial.print("NN");
 	}
 	Serial.print("\n");
