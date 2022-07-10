@@ -106,6 +106,7 @@ void get_adc() {
 	uint16_t adc_values_max = 0;
 	uint16_t adc_values_min = 1024;
 	uint16_t adc_values_avg = 0;
+	uint16_t adc_values_min_max_mean = 0;
 	uint32_t adc_values_sum = 0;
 	float flicker_gost = 0;
 	float flicker_simple = 0;
@@ -141,11 +142,7 @@ void get_adc() {
 	ets_intr_unlock(); //open interrupt
 	system_soft_wdt_restart();
 
-	//Serial.print(start);
-	//Serial.print("\n");
-	//Serial.print(stop);
-	//Serial.print("\n");
-
+	//Подсчет максимального, минимального, среднего, среднего между максимальным и минимальным значением
 	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
 		if (adc_values[i] >= adc_values_correction) {adc_values[i] = adc_values[i] - adc_values_correction;}
 		else {adc_values[i] = 0;}
@@ -154,8 +151,10 @@ void get_adc() {
 		if (adc_values[i] < adc_values_min) {adc_values_min = adc_values[i];}
 		adc_values_sum = adc_values_sum + adc_values[i];
 	}
+	adc_values_avg = adc_values_sum/MEASURE_NUM_SAMPLES;
+	adc_values_min_max_mean = (adc_values_max-adc_values_min)/2+adc_values_min
 
-
+	//Дебаг вывод буфера измерений
 	Serial.print("adc_values:\n");
 	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
 		Serial.print(adc_values[i]);
@@ -163,16 +162,18 @@ void get_adc() {
 	}
 	Serial.print("\n");
 
-	adc_values_avg = adc_values_sum/MEASURE_NUM_SAMPLES;
+	//Вычисление уровня мерцаний
 	flicker_gost = ((float)adc_values_max-(float)adc_values_min)*100/(2*(float)adc_values_avg);
 	flicker_simple = ((float)adc_values_max-(float)adc_values_min)*100/((float)adc_values_max+(float)adc_values_min);
 
+
+	//Frequency counting
 	uint16_t adc_mean_values[MEASURE_NUM_SAMPLES];
 	uint16_t adc_mean_values_i = 0;
 	uint16_t adc_mean_values_last_value = adc_values[0];
 	uint16_t adc_mean_values_last_number = MEASURE_NUM_SAMPLES;
 	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-		if (adc_mean_values_last_value <= adc_values_avg && adc_values[i] >= adc_values_avg)
+		if (adc_mean_values_last_value <= adc_values_min_max_mean && adc_values[i] >= adc_values_min_max_mean)
 		{
 			int16_t upper_threshold = adc_mean_values_last_number + 10;
 			if (upper_threshold > MEASURE_NUM_SAMPLES) upper_threshold = MEASURE_NUM_SAMPLES;
@@ -188,6 +189,7 @@ void get_adc() {
 		adc_mean_values_last_value = adc_values[i];
 	}
 
+	//Дебаг вывод для подсчета частота
 	Serial.print("adc_mean_values:\n");
 	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
 		Serial.print(adc_mean_values[i]);
@@ -220,7 +222,7 @@ void get_adc() {
 	tft.println((String)"Min:"+adc_values_min);
 	tft.println((String)"Tm:"+((float)(catch_stop_time-catch_start_time)/1000)+"ms");
 	tft.println((String)"Freq:"+"0");
-	tft.println((String)"Light:"+LightSensor.GetLightIntensity()+"lx");
+	tft.println((String)"Light:"+LightSensor.GetLightIntensity()+" lx");
 
 
 	make_graph();
