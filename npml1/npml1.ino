@@ -110,8 +110,8 @@ void get_adc() {
 	float flicker_simple = 0;
 
 	//Serial.print("\n\n");
-	uint32_t start = 0;
-	uint32_t stop = 0;
+	uint32_t catch_start_time = 0;
+	uint32_t catch_stop_time = 0;
 
 	wifi_set_opmode(NULL_MODE);
 	system_soft_wdt_stop();
@@ -119,23 +119,20 @@ void get_adc() {
 	ets_intr_lock( ); //close interrupt
 	noInterrupts();
 
-	for (uint16_t i=0; i<256; i++) {
-		adc_values_sum = adc_values_sum + system_adc_read();
-	}
-	adc_values_avg = adc_values_sum/256;
+	// Synchronization of measurements with the waveform to prevent graph drift
+	for (uint16_t i=0; i<num_samples/2; i++) { adc_values_sum = adc_values_sum + system_adc_read(); }
+	adc_values_avg = adc_values_sum/num_samples/2;
 
-	for (uint16_t i=0; i<256; i++) {
-		if (system_adc_read() > adc_values_avg) break;
-	}
-	for (uint16_t i=0; i<256; i++) {
-		if (system_adc_read() < adc_values_avg) break;
-	}
+	for (uint16_t i=0; i<num_samples/2; i++) { if (system_adc_read() > adc_values_avg) break; }
+	for (uint16_t i=0; i<num_samples/2; i++) { if (system_adc_read() < adc_values_avg) break; }
+	adc_values_sum = 0;
+	//The next measurement will occur in the middle of the wave
 
-	start = micros();
+	catch_start_time = micros();
 	for (uint16_t i=0; i<num_samples; i++) {
 		adc_values[i] = system_adc_read();
 	}
-	stop = micros();
+	catch_stop_time = micros();
 
 	interrupts();
 	ets_intr_unlock(); //open interrupt
@@ -184,6 +181,7 @@ void get_adc() {
 	tft.println((String)"Average:"+adc_values_avg);
 	tft.println((String)"Max:"+adc_values_max);
 	tft.println((String)"Min:"+adc_values_min);
+	tft.println((String)"Tm:"+catch_stop_time-catch_start_time);
 	tft.println((String)"Freq:"+"0");
 
 
