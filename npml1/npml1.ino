@@ -152,7 +152,7 @@ void get_adc() {
 		adc_values_sum = adc_values_sum + adc_values[i];
 	}
 	adc_values_avg = adc_values_sum/MEASURE_NUM_SAMPLES;
-	adc_values_min_max_mean = (adc_values_max-adc_values_min)/2+adc_values_min
+	adc_values_min_max_mean = (adc_values_max-adc_values_min)/2+adc_values_min;
 
 	//Дебаг вывод буфера измерений
 	Serial.print("adc_values:\n");
@@ -160,6 +160,11 @@ void get_adc() {
 		Serial.print(adc_values[i]);
 		Serial.print("NN");
 	}
+	Serial.print("\n");
+
+
+	Serial.print("adc_values_min_max_mean:");
+	Serial.print(adc_values_min_max_mean);
 	Serial.print("\n");
 
 	//Вычисление уровня мерцаний
