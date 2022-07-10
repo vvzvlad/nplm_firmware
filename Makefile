@@ -1,4 +1,4 @@
-main: build git_commit upload_fast miniterm
+main: build upload_fast git_commit miniterm
 
 #fqbn:
 #1) "--fqbn", not "-fqbn"
