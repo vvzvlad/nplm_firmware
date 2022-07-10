@@ -37,10 +37,13 @@ TickerScheduler ts(5);
 #define graph_width_divider 4
 #define graph_height_divider 20
 
-#define num_samples 512
+#define CORRECTION_NUM_SAMPLES 512
+#define MEASURE_NUM_SAMPLES 512
+#define SYNC_NUM_SAMPLES 256
 
+#define MAX_FREQ 300
 
-uint16_t adc_values[num_samples]; // point to the address of ADC continuously fast sampling output
+uint16_t adc_values[MEASURE_NUM_SAMPLES];
 
 uint16_t adc_values_correction = 0;
 
@@ -48,24 +51,23 @@ uint16_t adc_values_correction = 0;
 void get_adc_correction_value() {
 	uint32_t adc_values_sum = 0;
 
-	for (uint16_t i=0; i<num_samples; i++) {
+	for (uint16_t i=0; i<CORRECTION_NUM_SAMPLES; i++) {
 		adc_values_sum = adc_values_sum + system_adc_read();
 	}
-	adc_values_correction = adc_values_sum/num_samples;
+	adc_values_correction = adc_values_sum/CORRECTION_NUM_SAMPLES;
 	Serial.print("Correction:");
 	Serial.print(adc_values_correction);
 	Serial.print("\n\n");
 
 }
 
-uint8_t old_graph_values[graph_width];
 
 void make_graph() {
 	uint8_t graph_values[graph_width];
 
 	uint16_t adc_values_max = 0;
 	uint8_t adc_values_multiplier = 0;
-	for (uint16_t i=0; i<num_samples; i++) {
+	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
 		if (adc_values[i] > adc_values_max) {adc_values_max = adc_values[i];}
 	}
 	adc_values_max = adc_values_max/100*10+adc_values_max;
@@ -89,7 +91,6 @@ void make_graph() {
 		else {
 			tft.drawLine(col-1, 160-graph_values[col-1], col, 160-graph_values[col], ST7735_TFT_GREEN);
 		}
-		old_graph_values[col] = graph_values[col];
 	}
 
 
@@ -113,6 +114,7 @@ void get_adc() {
 	uint32_t catch_start_time = 0;
 	uint32_t catch_stop_time = 0;
 
+  //Disable everything that can interrupt measurements (interruptions, WIFI)
 	wifi_set_opmode(NULL_MODE);
 	system_soft_wdt_stop();
 	ESP.wdtDisable();
@@ -120,20 +122,21 @@ void get_adc() {
 	noInterrupts();
 
 	// Synchronization of measurements with the waveform to prevent graph drift
-	for (uint16_t i=0; i<256; i++) { adc_values_sum = adc_values_sum + system_adc_read(); }
-	adc_values_avg = adc_values_sum/256;
+	for (uint16_t i=0; i<SYNC_NUM_SAMPLES; i++) { adc_values_sum = adc_values_sum + system_adc_read(); }
+	adc_values_avg = adc_values_sum/SYNC_NUM_SAMPLES;
 
-	for (uint16_t i=0; i<256; i++) { if (system_adc_read() > adc_values_avg) break; }
-	for (uint16_t i=0; i<256; i++) { if (system_adc_read() < adc_values_avg) break; }
+	for (uint16_t i=0; i<SYNC_NUM_SAMPLES; i++) { if (system_adc_read() > adc_values_avg) break; }
+	for (uint16_t i=0; i<SYNC_NUM_SAMPLES; i++) { if (system_adc_read() < adc_values_avg) break; }
 	adc_values_sum = 0;
 	//The next measurement will occur in the middle of the wave
 
 	catch_start_time = micros();
-	for (uint16_t i=0; i<num_samples; i++) {
+	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
 		adc_values[i] = system_adc_read();
 	}
 	catch_stop_time = micros();
 
+	//Allow interrupts back
 	interrupts();
 	ets_intr_unlock(); //open interrupt
 	system_soft_wdt_restart();
@@ -143,20 +146,54 @@ void get_adc() {
 	//Serial.print(stop);
 	//Serial.print("\n");
 
-	for (uint16_t i=0; i<num_samples; i++) {
+	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
 		if (adc_values[i] >= adc_values_correction) {adc_values[i] = adc_values[i] - adc_values_correction;}
 		else {adc_values[i] = 0;}
 
 		if (adc_values[i] > adc_values_max) {adc_values_max = adc_values[i];}
 		if (adc_values[i] < adc_values_min) {adc_values_min = adc_values[i];}
 		adc_values_sum = adc_values_sum + adc_values[i];
-		//Serial.print(adc_values[i]);
-		//Serial.print("NN");
 	}
-	//Serial.print("\n");
-	adc_values_avg = adc_values_sum/num_samples;
+
+
+	Serial.print("adc_values:\n");
+	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
+		Serial.print(adc_values[i]);
+		Serial.print("NN");
+	}
+	Serial.print("\n");
+
+	adc_values_avg = adc_values_sum/MEASURE_NUM_SAMPLES;
 	flicker_gost = ((float)adc_values_max-(float)adc_values_min)*100/(2*(float)adc_values_avg);
 	flicker_simple = ((float)adc_values_max-(float)adc_values_min)*100/((float)adc_values_max+(float)adc_values_min);
+
+	uint16_t adc_mean_values[MEASURE_NUM_SAMPLES];
+	uint16_t adc_mean_values_i = 0;
+	uint16_t adc_mean_values_last_value = adc_values[0];
+	uint16_t adc_mean_values_last_number = MEASURE_NUM_SAMPLES;
+	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
+		if (adc_mean_values_last_value <= adc_values_avg && adc_values[i] >= adc_values_avg)
+		{
+			int16_t upper_threshold = adc_mean_values_last_number + 10;
+			if (upper_threshold > MEASURE_NUM_SAMPLES) upper_threshold = MEASURE_NUM_SAMPLES;
+			int16_t low_threshold = adc_mean_values_last_number - 10;
+			if (low_threshold < 0) low_threshold = 0;
+			if (i < low_threshold && i > upper_threshold)
+			{
+				adc_mean_values[adc_mean_values_i] = i;
+				adc_mean_values_last_number = i;
+				adc_mean_values_i++;
+			}
+		}
+		adc_mean_values_last_value = adc_values[i];
+	}
+
+	Serial.print("adc_mean_values:\n");
+	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
+		Serial.print(adc_mean_values[i]);
+		Serial.print("NN");
+	}
+	Serial.print("\n");
 
 	//Serial.print("Avg:");
 	//Serial.print(adc_values_avg);
@@ -183,6 +220,7 @@ void get_adc() {
 	tft.println((String)"Min:"+adc_values_min);
 	tft.println((String)"Tm:"+((float)(catch_stop_time-catch_start_time)/1000)+"ms");
 	tft.println((String)"Freq:"+"0");
+	tft.println((String)"Light:"+LightSensor.GetLightIntensity()+"lx");
 
 
 	make_graph();
@@ -203,7 +241,6 @@ void isr() {
 void button_click_handler() {
   Serial.print("Click\n");
 	get_adc();
-	measure_light();
 }
 
 void button_holded_handler() {
@@ -245,7 +282,7 @@ void setup(void) {
 	//get_adc_correction_value();
 
 	//ts.add(0, 2000, [&](void *) { measure_light(); }, nullptr, true);
-	ts.add(1, 100, [&](void *) { get_adc(); }, nullptr, true);
+	//ts.add(1, 100, [&](void *) { get_adc(); }, nullptr, true);
 
 
 }
