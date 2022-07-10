@@ -125,7 +125,7 @@ void get_adc() {
 
 	for (uint16_t i=0; i<num_samples/2; i++) { if (system_adc_read() > adc_values_avg) break; }
 	for (uint16_t i=0; i<num_samples/2; i++) { if (system_adc_read() < adc_values_avg) break; }
-	adc_values_sum = 0;
+	//adc_values_sum = 0;
 	//The next measurement will occur in the middle of the wave
 
 	catch_start_time = micros();
@@ -181,7 +181,7 @@ void get_adc() {
 	tft.println((String)"Average:"+adc_values_avg);
 	tft.println((String)"Max:"+adc_values_max);
 	tft.println((String)"Min:"+adc_values_min);
-	tft.println((String)"Tm:"+((float)(catch_stop_time-catch_start_time)/1000)+ms);
+	tft.println((String)"Tm:"+((float)(catch_stop_time-catch_start_time)/1000)+"ms");
 	tft.println((String)"Freq:"+"0");
 
 
