@@ -240,7 +240,7 @@ void setup(void) {
 	//get_adc_correction_value();
 
 	//ts.add(0, 2000, [&](void *) { measure_light(); }, nullptr, true);
-	ts.add(1, 200, [&](void *) { get_adc(); }, nullptr, true);
+	//ts.add(1, 200, [&](void *) { get_adc(); }, nullptr, true);
 
 
 }
