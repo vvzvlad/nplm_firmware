@@ -93,7 +93,7 @@ void make_graph() {
 			tft.drawLine(col-1, 160-graph_values[col-1], col, 160-graph_values[col], ST7735_TFT_GREEN);
 		}
 		old_graph_values[col] = graph_values[col];
-		delay(5);
+		//delay(5);
 	}
 
 
@@ -239,7 +239,7 @@ void setup(void) {
 	//get_adc_correction_value();
 
 	//ts.add(0, 2000, [&](void *) { measure_light(); }, nullptr, true);
-	//ts.add(1, 200, [&](void *) { get_adc(); }, nullptr, true);
+	ts.add(1, 100, [&](void *) { get_adc(); }, nullptr, true);
 
 
 }
