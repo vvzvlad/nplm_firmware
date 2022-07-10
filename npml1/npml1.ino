@@ -81,11 +81,8 @@ void make_graph() {
 		if (graph_values[i] > 50) {graph_values[i] = 50;}
 	}
 
-	//tft.fillRoundRect(0, 110, 128, 110+50, 0, ST7735_TFT_BLACK);
-	//tft.fillScreen(ST7735_TFT_BLACK);
-
 	for (uint8_t col=0; col < 128; col++) {
-		tft.drawLine(col, 110, col, 160, ST7735_TFT_CYAN);
+		tft.drawLine(col, 110, col, 160, ST7735_TFT_BLACK);
 		if (col == 0) {
 			tft.drawPixel(col, 160-graph_values[col], ST7735_TFT_GREEN);
 		}
@@ -93,7 +90,6 @@ void make_graph() {
 			tft.drawLine(col-1, 160-graph_values[col-1], col, 160-graph_values[col], ST7735_TFT_GREEN);
 		}
 		old_graph_values[col] = graph_values[col];
-		//delay(5);
 	}
 
 
@@ -122,6 +118,18 @@ void get_adc() {
 	ESP.wdtDisable();
 	ets_intr_lock( ); //close interrupt
 	noInterrupts();
+
+	for (uint16_t i=0; i<256; i++) {
+		adc_values_sum = adc_values_sum + system_adc_read();
+	}
+	adc_values_avg = adc_values_sum/256;
+
+	for (uint16_t i=0; i<256; i++) {
+		if (system_adc_read() > adc_values_avg) break;
+	}
+	for (uint16_t i=0; i<256; i++) {
+		if (system_adc_read() < adc_values_avg) break;
+	}
 
 	start = micros();
 	for (uint16_t i=0; i<num_samples; i++) {
