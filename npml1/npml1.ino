@@ -120,12 +120,12 @@ void get_adc() {
 	noInterrupts();
 
 	// Synchronization of measurements with the waveform to prevent graph drift
-	for (uint16_t i=0; i<num_samples/2; i++) { adc_values_sum = adc_values_sum + system_adc_read(); }
-	adc_values_avg = adc_values_sum/num_samples/2;
+	for (uint16_t i=0; i<256; i++) { adc_values_sum = adc_values_sum + system_adc_read(); }
+	adc_values_avg = adc_values_sum/256;
 
-	for (uint16_t i=0; i<num_samples/2; i++) { if (system_adc_read() > adc_values_avg) break; }
-	for (uint16_t i=0; i<num_samples/2; i++) { if (system_adc_read() < adc_values_avg) break; }
-	//adc_values_sum = 0;
+	for (uint16_t i=0; i<256; i++) { if (system_adc_read() > adc_values_avg) break; }
+	for (uint16_t i=0; i<256; i++) { if (system_adc_read() < adc_values_avg) break; }
+	adc_values_sum = 0;
 	//The next measurement will occur in the middle of the wave
 
 	catch_start_time = micros();
