@@ -181,7 +181,7 @@ void get_adc() {
 	tft.println((String)"Average:"+adc_values_avg);
 	tft.println((String)"Max:"+adc_values_max);
 	tft.println((String)"Min:"+adc_values_min);
-	tft.println((String)"Tm:"+catch_stop_time-catch_start_time);
+	tft.println((String)"Tm:"+((float)(catch_stop_time-catch_start_time)/1000)+ms);
 	tft.println((String)"Freq:"+"0");
 
 
