@@ -86,15 +86,15 @@ void make_graph() {
 
 	for (uint8_t col=0; col < 128; col++) {
 		if (col == 0) {
-			tft.drawPixel(col, 160-old_graph_values[col], ST7735_TFT_BLACK);
+			tft.drawPixel(col, 160-old_graph_values[col], ST7735_TFT_CYAN);
 			tft.drawPixel(col, 160-graph_values[col], ST7735_TFT_GREEN);
 		}
 		else {
-			tft.fillRect(col-1-1, 160-old_graph_values[col-1]-1, col+1, 160-old_graph_values[col]+1, ST7735_TFT_BLACK);
+			tft.fillRect(col-1-1, 160-old_graph_values[col-1]-1, col+1, 160-old_graph_values[col]+1, ST7735_TFT_CYAN);
 			tft.drawLine(col-1, 160-graph_values[col-1], col, 160-graph_values[col], ST7735_TFT_GREEN);
 		}
 		old_graph_values[col] = graph_values[col];
-
+		delay(1);
 	}
 
 
