@@ -17,7 +17,7 @@ upload_fast:
 
 git_commit:
 	echo "Press enter fot git commit & push"
-	read -t 3 -n 1 || exit && git add . ; git commit -m "Auto(press enter): `date +'%Y-%m-%d %H:%M:%S'`" ; git remote | xargs -L1 git push --all > /dev/null 2>&1 &
+	read -t 3 -n 1 || exit 0 && git add . ; git commit -m "Auto(press enter): `date +'%Y-%m-%d %H:%M:%S'`" ; git remote | xargs -L1 git push --all > /dev/null 2>&1 &
 
 miniterm:
 	miniterm.py /dev/tty.usbserial* 115200
