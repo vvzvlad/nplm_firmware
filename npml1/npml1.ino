@@ -177,7 +177,8 @@ void get_adc() {
 	uint16_t adc_mean_values_i = 0;
 	uint16_t adc_mean_values_last_value = adc_values[0];
 	uint16_t adc_mean_values_last_number = MEASURE_NUM_SAMPLES;
-	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
+	//for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
+	for (uint16_t i=0; i<50; i++) {
 		if (adc_mean_values_last_value <= adc_values_min_max_mean && adc_values[i] >= adc_values_min_max_mean)
 		{
 			int16_t upper_threshold = adc_mean_values_last_number + 15;
@@ -196,7 +197,8 @@ void get_adc() {
 
 	//Дебаг вывод для подсчета частоты
 	Serial.print("adc_mean_values:\n");
-	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
+	//for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
+	for (uint16_t i=0; i<50; i++) {
 		Serial.print(adc_mean_values[i]);
 		Serial.print("NN");
 	}
