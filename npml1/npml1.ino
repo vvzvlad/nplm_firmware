@@ -175,25 +175,45 @@ void get_adc() {
 	//Frequency counting
 	uint16_t adc_mean_values[MEASURE_NUM_SAMPLES] = {};
 	uint16_t adc_mean_values_i = 0;
+
 	uint16_t adc_mean_values_last_value = adc_values[0];
 	uint16_t adc_mean_values_last_number = MEASURE_NUM_SAMPLES;
 
 	uint16_t acc=0;
-	for (uint16_t i=0; i<(MEASURE_NUM_SAMPLES/2); i++) {
-		if (adc_values[i] > adc_values_min_max_mean)
-		{
-			Serial.println((String)"i:"+i+", adc_values:"+adc_values[i]);
-			acc = i;
-			break;
+	uint8_t not_found_flag = 0;
+	while(not_found_flag == 0) {
+		not_found_flag=1;
+		for (uint16_t i=acc; i<MEASURE_NUM_SAMPLES; i++) {
+			if (adc_values[i] > adc_values_min_max_mean)
+			{
+				Serial.println((String)"i:"+i+", adc_values:"+adc_values[i]);
+				tft.drawLine(i/graph_width_divider, 110, i/graph_width_divider, 160, ST7735_TFT_CYAN);
+				acc = i+20;
+				adc_mean_values[adc_mean_values_i] = i;
+				adc_mean_values_i++;
+				not_found_flag = 0;
+				break;
+			}
+		}
+
+		for (uint16_t i=acc; i<MEASURE_NUM_SAMPLES; i++) {
+			if (not_found_flag == 1) break;
+			else not_found_flag == 1;
+
+			if (adc_values[i] < adc_values_min_max_mean)
+			{
+				tft.drawLine(i/graph_width_divider, 110, i/graph_width_divider, 160, ST7735_TFT_CYAN);
+				Serial.println((String)"i:"+i+", adc_values:"+adc_values[i]);
+				adc_mean_values[adc_mean_values_i] = i;
+				adc_mean_values_i++;
+				acc = i+20;
+				not_found_flag = 0;
+				break;
+			}
 		}
 	}
-	for (uint16_t i=acc; i<(acc+(MEASURE_NUM_SAMPLES/2)); i++) {
-		if (adc_values[i] < adc_values_min_max_mean)
-		{
-			Serial.println((String)"i:"+i+", adc_values:"+adc_values[i]);
-			break;
-		}
-	}
+
+
 
 //{ if (system_adc_read() > adc_values_avg) break; }
 		//if (adc_mean_values_last_value <= adc_values_min_max_mean && adc_values[i] >= adc_values_min_max_mean)
