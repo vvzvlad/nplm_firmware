@@ -177,23 +177,40 @@ void get_adc() {
 	uint16_t adc_mean_values_i = 0;
 	uint16_t adc_mean_values_last_value = adc_values[0];
 	uint16_t adc_mean_values_last_number = MEASURE_NUM_SAMPLES;
-	//for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-	for (uint16_t i=0; i<50; i++) {
-		if (adc_mean_values_last_value <= adc_values_min_max_mean && adc_values[i] >= adc_values_min_max_mean)
+
+	uint16_t acc=0;
+	for (uint16_t i=0; i<(MEASURE_NUM_SAMPLES/2); i++) {
+		if (adc_values[i] > adc_values_min_max_mean)
 		{
-			int16_t upper_threshold = adc_mean_values_last_number + 15;
-			if (upper_threshold > MEASURE_NUM_SAMPLES) upper_threshold = MEASURE_NUM_SAMPLES;
-			int16_t low_threshold = adc_mean_values_last_number - 15;
-			if (low_threshold < 0) low_threshold = 0;
-			if (i < low_threshold && i > upper_threshold)
-			{
-				adc_mean_values[adc_mean_values_i] = i;
-				adc_mean_values_last_number = i;
-				adc_mean_values_i++;
-			}
+			Serial.println((String)"i:"+i+", adc_values:"+adc_values[i]);
+			acc = i;
+			break;
 		}
-		adc_mean_values_last_value = adc_values[i];
 	}
+	for (uint16_t i=acc; i<(acc+(MEASURE_NUM_SAMPLES/2)); i++) {
+		if (adc_values[i] < adc_values_min_max_mean)
+		{
+			Serial.println((String)"i:"+i+", adc_values:"+adc_values[i]);
+			break;
+		}
+	}
+
+//{ if (system_adc_read() > adc_values_avg) break; }
+		//if (adc_mean_values_last_value <= adc_values_min_max_mean && adc_values[i] >= adc_values_min_max_mean)
+		//{
+		//	int16_t upper_threshold = adc_mean_values_last_number + 15;
+		//	if (upper_threshold > MEASURE_NUM_SAMPLES) upper_threshold = MEASURE_NUM_SAMPLES;
+		//	int16_t low_threshold = adc_mean_values_last_number - 15;
+		//	if (low_threshold < 0) low_threshold = 0;
+		//	if (i < low_threshold && i > upper_threshold)
+		//	{
+		//		adc_mean_values[adc_mean_values_i] = i;
+		//		adc_mean_values_last_number = i;
+		//		adc_mean_values_i++;
+		//	}
+		//}
+		//adc_mean_values_last_value = adc_values[i];
+	//}
 
 	//Дебаг вывод для подсчета частоты
 	Serial.print("adc_mean_values:\n");
@@ -229,7 +246,7 @@ void get_adc() {
 	tft.println((String)"Min:"+adc_values_min);
 	tft.println((String)"Tm:"+((float)(catch_stop_time-catch_start_time)/1000)+"ms");
 	tft.println((String)"Freq:"+"0");
-	tft.println((String)"Light:"+LightSensor.GetLightIntensity()+" lx");
+	//tft.println((String)"Light:"+LightSensor.GetLightIntensity()+" lx");
 
 
 	make_graph();
