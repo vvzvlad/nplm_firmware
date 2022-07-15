@@ -26,8 +26,8 @@ miniterm:
 	@miniterm.py /dev/tty.usbserial* 115200
 
 exeption_decode:
-	@echo "Paste stacktrace and press CTRL+D"
-	@read -d '' TRACE ; echo $TRACE > ./bin/trace.tmp && java -jar ./common/EspStackTraceDecoder.jar ~/Library/Arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.0.4-gcc10.3-1757bed/bin/xtensa-lx106-elf-addr2line ./bin/npml1.ino.elf ./bin/trace.tmp ; rm ./bin/trace.tmp
+	@echo "Paste stacktrace and press '/' "
+	@read -d '/' TRACE ; echo $TRACE > ./bin/trace.tmp && java -jar ./common/EspStackTraceDecoder.jar ~/Library/Arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.0.4-gcc10.3-1757bed/bin/xtensa-lx106-elf-addr2line ./bin/npml1.ino.elf ./bin/trace.tmp ; rm ./bin/trace.tmp
 
 clean:
 	arduino-cli cache clean

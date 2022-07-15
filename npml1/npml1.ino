@@ -1,19 +1,21 @@
+#include <ESP8266WiFi.h>
+
 #include <Adafruit_GFX.h>    // Core graphics library
 #include <Adafruit_ST7735.h> // Hardware-specific library for ST7735
 #include <SPI.h>
-#include <BH1750FVI.h>
-#include <TickerScheduler.h>
 
+#include <BH1750FVI.h>
+
+#include <TickerScheduler.h>
 #include <EncButton.h>
 
-#include <ESP8266WiFi.h>
 
 //Debug: Serial.println(__LINE__);
 
-#define ST7735_TFT_CS         4 		//D2  //белый
-#define ST7735_TFT_RST        -1  	//желтый
-#define ST7735_TFT_DC         5 		//D1  //синий
-#define BUTTON_PIN         		16
+#define ST7735_TFT_CS         	4 		//D2  //белый https://cdn.compacttool.ru/images/docs/Wemos_D1_mini_pinout.jpg
+#define ST7735_TFT_RST        	-1  	//желтый
+#define ST7735_TFT_DC         	5 		//D1  //синий
+#define BUTTON_PIN         			16
 
 Adafruit_ST7735 tft = Adafruit_ST7735(ST7735_TFT_CS, ST7735_TFT_DC, ST7735_TFT_RST);
 BH1750FVI LightSensor(BH1750FVI::k_DevModeContLowRes);
@@ -22,33 +24,34 @@ EncButton<EB_CALLBACK, BUTTON_PIN> btn(INPUT);
 TickerScheduler ts(5);
 
 //Screen resolution
-#define ST7735_TFT_WIDTH 128
-#define ST7735_TFT_HEIGHT 160
+#define ST7735_TFT_WIDTH 				128
+#define ST7735_TFT_HEIGHT 			160
 
 //Colors in RGB565 format: rrrrrggg:gggbbbbb
-#define ST7735_TFT_BLACK 0x0000
-#define ST7735_TFT_BLUE 0x001F
-#define ST7735_TFT_RED 0xF800
-#define ST7735_TFT_GREEN 0x07E0
-#define ST7735_TFT_CYAN 0x07FF
-#define ST7735_TFT_MAGENTA 0xF81F
-#define ST7735_TFT_YELLOW 0xFFE0
-#define ST7735_TFT_WHITE 0xFFFF
+#define ST7735_TFT_BLACK 				0x0000
+#define ST7735_TFT_BLUE 				0x001F
+#define ST7735_TFT_RED 					0xF800
+#define ST7735_TFT_GREEN 				0x07E0
+#define ST7735_TFT_CYAN 				0x07FF
+#define ST7735_TFT_MAGENTA 			0xF81F
+#define ST7735_TFT_YELLOW 			0xFFE0
+#define ST7735_TFT_WHITE 				0xFFFF
 
 
 //Graph defines
-#define GRAPH_WIDTH ST7735_TFT_WIDTH
-#define GRAPH_HEIGHT 50
-#define GRAPH_WIDTH_DIVIDER 4   // 512(samples number, MEASURE_NUM_SAMPLES) -> 128 (chart width, GRAPH_WIDTH)
-#define GRAPH_HEIGHT_DIVIDER 20 // 1024(single-count resolution) ->  50(chart height, GRAPH_HEIGHT)
-#define GRAPH_X 0
-#define GRAPH_Y ST7735_TFT_HEIGHT-GRAPH_HEIGHT
+#define GRAPH_WIDTH 						ST7735_TFT_WIDTH
+#define GRAPH_HEIGHT 						50
+#define GRAPH_WIDTH_DIVIDER 		4   // 512(samples number, MEASURE_NUM_SAMPLES) -> 128 (chart width, GRAPH_WIDTH)
+#define GRAPH_HEIGHT_DIVIDER 		20 // 1024(single-count resolution, MAX_ADC_VALUE) ->  50(chart height, GRAPH_HEIGHT)
+#define GRAPH_X 								0
+#define GRAPH_Y 								ST7735_TFT_HEIGHT-GRAPH_HEIGHT
 
-#define CORRECTION_NUM_SAMPLES 512
-#define MEASURE_NUM_SAMPLES 512
-#define SYNC_NUM_SAMPLES 256
+#define CORRECTION_NUM_SAMPLES 	512
+#define MEASURE_NUM_SAMPLES 		512
+#define SYNC_NUM_SAMPLES 				256
+#define MAX_ADC_VALUE 					1024
 
-#define MAX_FREQ 300
+#define MAX_FREQ 								300
 
 uint16_t GLOBAL_adc_correction = 0;
 
@@ -70,6 +73,7 @@ uint16_t get_adc_correction_value(uint16_t correction_catch_time_ms) {
 
 	return correction_value;
 }
+
 
 float calc_frequency(uint16_t *adc_values_array, uint16_t adc_values_min_max_mean, uint32_t catch_time_us) {
 	uint16_t adc_mean_values[MEASURE_NUM_SAMPLES] = {};
@@ -133,7 +137,7 @@ float calc_frequency(uint16_t *adc_values_array, uint16_t adc_values_min_max_mea
 	//Serial.print("period_time_us:");
 	//Serial.print(period_time_us);
 
-	//Дебаг вывод для подсчета частоты
+	//Debug output for frequency counting
 	//Serial.print("adc_mean_values:\n");
 	//for (uint16_t i=0; i<50; i++) {
 	//	Serial.print(adc_mean_values[i]);
@@ -151,7 +155,7 @@ void make_graph(uint16_t *adc_values_array, uint16_t adc_values_max) {
 
 	adc_values_max = adc_values_max/100*10+adc_values_max;
 	if (adc_values_max == 0) { adc_values_max = 1; };
-	adc_values_multiplier = 1024/adc_values_max;
+	adc_values_multiplier = MAX_ADC_VALUE/adc_values_max;
 
 
 	for (uint16_t i=0; i < GRAPH_WIDTH; i++) {
@@ -190,15 +194,14 @@ void make_graph(uint16_t *adc_values_array, uint16_t adc_values_max) {
 
 void measure_flicker() {
 	uint16_t adc_values[MEASURE_NUM_SAMPLES] = {};
-	uint16_t adc_values_max = 1;
-	uint16_t adc_values_min = 1024;
+	uint16_t adc_values_max = 1; //to prevent division by zero if we get zeros in the measurement (or after applying the correction).
+	uint16_t adc_values_min = MAX_ADC_VALUE;
 	uint16_t adc_values_avg = 0;
 	uint16_t adc_values_min_max_mean = 0;
 	uint32_t adc_values_sum = 0;
 	float flicker_gost = 0;
 	float flicker_simple = 0;
 
-	//Serial.print("\n\n");
 	uint32_t catch_start_time = 0;
 	uint32_t catch_stop_time = 0;
 	uint32_t catch_time_us = 0;
@@ -267,6 +270,9 @@ void measure_flicker() {
 	//Flicker frequency calculation
 	float freq = calc_frequency(adc_values, adc_values_min_max_mean, catch_time_us);
 
+
+
+	//debug prints
 	//Serial.print("Avg:");
 	//Serial.print(adc_values_avg);
 	//Serial.print(", Max:");
@@ -282,7 +288,7 @@ void measure_flicker() {
 
 	//tft.fillRoundRect(0, 0, 128, 110, 0, ST7735_TFT_BLACK);
 	tft.setCursor(0, 0);
-	tft.setTextColor(ST7735_TFT_GREEN, ST7735_TFT_BLACK);
+	tft.setTextColor(ST7735_TFT_GREEN, ST7735_TFT_BLACK); //The first argument is the font color, the second is the background color.
 	tft.setTextSize(1);
 	tft.println((String)"Flicker GOST:"+flicker_gost);
 	tft.println((String)"Flicker simple:"+flicker_simple);
@@ -340,7 +346,7 @@ void show_startup_screen_and_get_correction() {
 	GLOBAL_adc_correction = get_adc_correction_value(2000);
 	tft.println((String)"Correction: "+GLOBAL_adc_correction);
 	tft.fillRoundRect(0, 0, ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT, 0, ST7735_TFT_BLACK);
-	//delay(1000);
+	delay(1000);
 }
 
 
