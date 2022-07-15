@@ -339,6 +339,7 @@ void show_startup_screen_and_get_correction() {
 	tft.println((String)"Calibration... ");
 	GLOBAL_adc_correction = get_adc_correction_value(2000);
 	tft.println((String)"Correction: "+GLOBAL_adc_correction);
+	tft.fillRoundRect(0, 0, ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT, 0, ST7735_TFT_BLACK);
 	//delay(1000);
 }
 
