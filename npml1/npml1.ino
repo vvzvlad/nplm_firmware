@@ -1,5 +1,3 @@
-
-
 #include <Adafruit_GFX.h>    // Core graphics library
 #include <Adafruit_ST7735.h> // Hardware-specific library for ST7735
 #include <SPI.h>
@@ -10,10 +8,10 @@
 
 #include <ESP8266WiFi.h>
 
-#define ST7735_TFT_CS         4 //D2  //белый
-#define ST7735_TFT_RST        -1  //желтый
-#define ST7735_TFT_DC         5 //D1  //синий
-#define BUTTON_PIN         16
+#define ST7735_TFT_CS         4 		//D2  //белый
+#define ST7735_TFT_RST        -1  	//желтый
+#define ST7735_TFT_DC         5 		//D1  //синий
+#define BUTTON_PIN         		16
 
 Adafruit_ST7735 tft = Adafruit_ST7735(ST7735_TFT_CS, ST7735_TFT_DC, ST7735_TFT_RST);
 BH1750FVI LightSensor(BH1750FVI::k_DevModeContLowRes);
@@ -21,7 +19,11 @@ EncButton<EB_CALLBACK, BUTTON_PIN> btn(INPUT);
 
 TickerScheduler ts(5);
 
+//Screen resolution
+#define ST7735_TFT_WIDTH 128
+#define ST7735_TFT_HEIGHT 160
 
+//Colors in RGB565 format: rrrrrggg:gggbbbbb
 #define ST7735_TFT_BLACK 0x0000
 #define ST7735_TFT_BLUE 0x001F
 #define ST7735_TFT_RED 0xF800
@@ -31,11 +33,14 @@ TickerScheduler ts(5);
 #define ST7735_TFT_YELLOW 0xFFE0
 #define ST7735_TFT_WHITE 0xFFFF
 
-#define graph_width 128
-#define graph_height 50
 
-#define graph_width_divider 4
-#define graph_height_divider 20
+//Graph defines
+#define GRAPH_WIDTH ST7735_TFT_WIDTH
+#define GRAPH_HEIGHT 50
+#define GRAPH_WIDTH_DIVIDER 4   // 512(samples number, MEASURE_NUM_SAMPLES) -> 128 (chart width, GRAPH_WIDTH)
+#define GRAPH_HEIGHT_DIVIDER 20 // 1024(single-count resolution) ->  50(chart height, GRAPH_HEIGHT)
+#define GRAPH_X 0
+#define GRAPH_Y ST7735_TFT_HEIGHT-GRAPH_HEIGHT
 
 #define CORRECTION_NUM_SAMPLES 512
 #define MEASURE_NUM_SAMPLES 512
@@ -61,42 +66,122 @@ void get_adc_correction_value() {
 
 }
 
+float calc_frequency(uint16_t *adc_values_array, uint16_t adc_values_min_max_mean, uint32_t catch_time_us) {
+	uint16_t adc_mean_values[MEASURE_NUM_SAMPLES] = {};
+	uint16_t adc_mean_values_i = 0;
 
-void make_graph() {
-	uint8_t graph_values[graph_width] = {};
+	uint16_t acc=0;
+	uint8_t not_found_flag = 0;
 
-	uint16_t adc_values_max = 0;
-	uint8_t adc_values_multiplier = 0;
-	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-		if (adc_values[i] > adc_values_max) {adc_values_max = adc_values[i];}
+	while(not_found_flag == 0) {
+		not_found_flag=1;
+		for (uint16_t i=acc; i<MEASURE_NUM_SAMPLES; i++) {
+			if (adc_values_array[i] > adc_values_min_max_mean)
+			{
+				//Serial.println((String)"i:"+i+", adc_values_array:"+adc_values_array[i]);
+				//tft.drawLine(i/GRAPH_WIDTH_DIVIDER, 110, i/GRAPH_WIDTH_DIVIDER, 160, ST7735_TFT_CYAN);
+				acc = i+20;
+				not_found_flag = 0;
+				break;
+			}
+		}
+
+		for (uint16_t i=acc; i<MEASURE_NUM_SAMPLES; i++) {
+			if (not_found_flag == 1) break;
+			else not_found_flag == 1;
+
+			if (adc_values_array[i] < adc_values_min_max_mean)
+			{
+				//tft.drawLine(i/GRAPH_WIDTH_DIVIDER, 110, i/GRAPH_WIDTH_DIVIDER, 160, ST7735_TFT_CYAN);
+				//Serial.println((String)"i:"+i+", adc_values_array:"+adc_values_array[i]);
+				adc_mean_values[adc_mean_values_i] = i;
+				adc_mean_values_i++;
+				acc = i+20;
+				not_found_flag = 0;
+				break;
+			}
+		}
 	}
+
+	uint16_t adc_mean_values_distances_sum = 0;
+	float adc_mean_values_distances_mean = 0;
+	uint8_t adc_mean_values_distances_i = 0;
+
+	for (uint16_t i=1; i<MEASURE_NUM_SAMPLES; i++) {
+		if (adc_mean_values[i] != 0) {
+			adc_mean_values_distances_sum = adc_mean_values_distances_sum + adc_mean_values[i]-adc_mean_values[i-1];
+			adc_mean_values_distances_i++;
+		}
+		else {
+			if (adc_mean_values_distances_i != 0) {
+				adc_mean_values_distances_mean = (float)adc_mean_values_distances_sum/(float)adc_mean_values_distances_i;
+			}
+			else {
+				adc_mean_values_distances_mean = 0;
+			}
+		};
+	}
+
+	uint16_t sample_time_us = catch_time_us/MEASURE_NUM_SAMPLES;
+	uint16_t period_time_us = sample_time_us*adc_mean_values_distances_mean;
+	float freq = (float)1000000/period_time_us;
+	//Serial.print("period_time_us:");
+	//Serial.print(period_time_us);
+
+	//Дебаг вывод для подсчета частоты
+	//Serial.print("adc_mean_values:\n");
+	//for (uint16_t i=0; i<50; i++) {
+	//	Serial.print(adc_mean_values[i]);
+	//	Serial.print("NN");
+	//}
+	//Serial.print("\n");
+
+	return freq;
+}
+
+
+void make_graph(uint16_t adc_values_max) {
+	uint8_t graph_values[GRAPH_WIDTH] = {};
+	//uint16_t adc_values_max = 0;
+	uint8_t adc_values_multiplier = 0;
+
+	//for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
+	//	if (adc_values[i] > adc_values_max) {adc_values_max = adc_values[i];}
+	//}
+
 	adc_values_max = adc_values_max/100*10+adc_values_max;
 	adc_values_multiplier = 1024/adc_values_max;
 
 
-	for (uint16_t i=0; i < graph_width; i++) {
-		graph_values[i] = (adc_values[i*graph_width_divider+0]*adc_values_multiplier+
-												adc_values[i*graph_width_divider+1]*adc_values_multiplier+
-												adc_values[i*graph_width_divider+2]*adc_values_multiplier+
-												adc_values[i*graph_width_divider+3]*adc_values_multiplier)
-												/graph_width_divider/graph_height_divider;
+	for (uint16_t i=0; i < GRAPH_WIDTH; i++) {
+		graph_values[i] = (adc_values[i*GRAPH_WIDTH_DIVIDER+0]*adc_values_multiplier+
+												adc_values[i*GRAPH_WIDTH_DIVIDER+1]*adc_values_multiplier+
+												adc_values[i*GRAPH_WIDTH_DIVIDER+2]*adc_values_multiplier+
+												adc_values[i*GRAPH_WIDTH_DIVIDER+3]*adc_values_multiplier)
+												/GRAPH_WIDTH_DIVIDER/GRAPH_HEIGHT_DIVIDER;
 		if (graph_values[i] > 50) {graph_values[i] = 50;}
 	}
 
-	for (uint8_t col=0; col < 128; col++) {
-		tft.drawLine(col, 110, col, 160, ST7735_TFT_BLACK);
-		if (col == 0) {
-			tft.drawPixel(col, 160-graph_values[col], ST7735_TFT_GREEN);
+	for (uint8_t current_colon = GRAPH_X; current_colon < GRAPH_WIDTH; current_colon++) {
+		tft.drawLine(current_colon, GRAPH_Y, current_colon, ST7735_TFT_HEIGHT, ST7735_TFT_BLACK); //old graph colon-by-colon clearing
+		if (current_colon == 0) {
+			tft.drawPixel(current_colon, //The first point is drawn as a pixel because it has no past point
+										ST7735_TFT_HEIGHT-graph_values[current_colon],
+										ST7735_TFT_GREEN);
 		}
 		else {
-			tft.drawLine(col-1, 160-graph_values[col-1], col, 160-graph_values[col], ST7735_TFT_GREEN);
+			tft.drawLine(current_colon-1,  //The following points are drawn as lines to prevent gaps between individual points on steep hillsides
+										ST7735_TFT_HEIGHT-graph_values[current_colon-1],
+										current_colon,
+										ST7735_TFT_HEIGHT-graph_values[current_colon],
+										ST7735_TFT_GREEN);
 		}
 	}
 
 
 	//Serial.print("\n");
-	//for (uint8_t col=0; col < 128; col++) {
-	//	Serial.print(graph_values[col]);
+	//for (uint8_t current_colon=0; current_colon < GRAPH_WIDTH; current_colon++) {
+	//	Serial.print(graph_values[current_colon]);
 	//	Serial.print("NN");
 	//}
 	//Serial.print("\n");
@@ -132,19 +217,29 @@ void get_adc() {
 	adc_values_sum = 0;
 	//The next measurement will occur in the middle of the wave
 
+	//Непосредственно измерение
 	catch_start_time = micros();
 	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
 		adc_values[i] = system_adc_read();
 	}
 	catch_stop_time = micros();
 	catch_time_us = catch_stop_time-catch_start_time;
+	//Окончание измерения
 
 	//Allow interrupts back
 	interrupts();
 	ets_intr_unlock(); //open interrupt
 	system_soft_wdt_restart();
 
-	//Подсчет максимального, минимального, среднего, среднего между максимальным и минимальным значением
+	//Дебаг вывод буфера измерений
+	//Serial.print("adc_values:\n");
+	//for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
+	//	Serial.print(adc_values[i]);
+	//	Serial.print("NN");
+	//}
+	//Serial.print("\n");
+
+	//Подсчет максимального, минимального, среднего, среднего между максимальным и минимальным значением(для измерения частоты)
 	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
 		if (adc_values[i] >= adc_values_correction) {adc_values[i] = adc_values[i] - adc_values_correction;}
 		else {adc_values[i] = 0;}
@@ -156,94 +251,16 @@ void get_adc() {
 	adc_values_avg = adc_values_sum/MEASURE_NUM_SAMPLES;
 	adc_values_min_max_mean = (adc_values_max-adc_values_min)/2+adc_values_min;
 
-	//Дебаг вывод буфера измерений
-	//Serial.print("adc_values:\n");
-	//for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-	//	Serial.print(adc_values[i]);
-	//	Serial.print("NN");
-	//}
-	//Serial.print("\n");
-
-
 	//Serial.print("adc_values_min_max_mean:");
 	//Serial.print(adc_values_min_max_mean);
 	//Serial.print("\n");
 
-	//Вычисление уровня мерцаний
+	//Flicker level calculation
 	flicker_gost = ((float)adc_values_max-(float)adc_values_min)*100/(2*(float)adc_values_avg);
 	flicker_simple = ((float)adc_values_max-(float)adc_values_min)*100/((float)adc_values_max+(float)adc_values_min);
 
-
-	//Frequency counting
-	uint16_t adc_mean_values[MEASURE_NUM_SAMPLES] = {};
-	uint16_t adc_mean_values_i = 0;
-
-	uint16_t acc=0;
-	uint8_t not_found_flag = 0;
-	while(not_found_flag == 0) {
-		not_found_flag=1;
-		for (uint16_t i=acc; i<MEASURE_NUM_SAMPLES; i++) {
-			if (adc_values[i] > adc_values_min_max_mean)
-			{
-				//Serial.println((String)"i:"+i+", adc_values:"+adc_values[i]);
-				//tft.drawLine(i/graph_width_divider, 110, i/graph_width_divider, 160, ST7735_TFT_CYAN);
-				acc = i+20;
-				not_found_flag = 0;
-				break;
-			}
-		}
-
-		for (uint16_t i=acc; i<MEASURE_NUM_SAMPLES; i++) {
-			if (not_found_flag == 1) break;
-			else not_found_flag == 1;
-
-			if (adc_values[i] < adc_values_min_max_mean)
-			{
-				//tft.drawLine(i/graph_width_divider, 110, i/graph_width_divider, 160, ST7735_TFT_CYAN);
-				//Serial.println((String)"i:"+i+", adc_values:"+adc_values[i]);
-				adc_mean_values[adc_mean_values_i] = i;
-				adc_mean_values_i++;
-				acc = i+20;
-				not_found_flag = 0;
-				break;
-			}
-		}
-	}
-
-	uint16_t adc_mean_values_distances_sum = 0;
-	float adc_mean_values_distances_mean = 0;
-	uint8_t adc_mean_values_distances_i = 0;
-	for (uint16_t i=1; i<MEASURE_NUM_SAMPLES; i++) {
-		if (adc_mean_values[i] != 0) {
-			adc_mean_values_distances_sum = adc_mean_values_distances_sum + adc_mean_values[i]-adc_mean_values[i-1];
-			adc_mean_values_distances_i++;
-		}
-		else {
-			if (adc_mean_values_distances_i != 0) {
-				adc_mean_values_distances_mean = (float)adc_mean_values_distances_sum/(float)adc_mean_values_distances_i;
-			}
-			else {
-				adc_mean_values_distances_mean = 0;
-			}
-		};
-	}
-	uint16_t sample_time_us = catch_time_us/MEASURE_NUM_SAMPLES;
-	uint16_t period_time_us = sample_time_us*adc_mean_values_distances_mean;
-	float freq = (float)1000000/period_time_us;
-	//Serial.print("period_time_us:");
-	//Serial.print(period_time_us);
-
-
-
-	//Дебаг вывод для подсчета частоты
-	//Serial.print("adc_mean_values:\n");
-	////for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-	//for (uint16_t i=0; i<50; i++) {
-	//	Serial.print(adc_mean_values[i]);
-	//	Serial.print("NN");
-	//}
-	//Serial.print("\n");
-
+	//Flicker frequency calculation
+	float freq = calc_frequency(adc_values, adc_values_min_max_mean, catch_time_us);
 
 	//Serial.print("Avg:");
 	//Serial.print(adc_values_avg);
@@ -273,7 +290,7 @@ void get_adc() {
 	tft.println((String)"Light:"+LightSensor.GetLightIntensity()+" lx");
 
 
-	make_graph();
+	make_graph(adc_values_max);
 }
 
 
