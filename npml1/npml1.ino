@@ -187,7 +187,7 @@ void make_graph(uint16_t *adc_values_array, uint16_t adc_values_max) {
 	//Serial.print("\n");
 }
 
-void get_adc() {
+void measure_flicker() {
 	uint16_t adc_values[MEASURE_NUM_SAMPLES] = {};
 	uint16_t adc_values_max = 0;
 	uint16_t adc_values_min = 1024;
@@ -242,8 +242,8 @@ void get_adc() {
 
 	//Calculating the maximum, minimum, average, average between the maximum and minimum values (for frequency measure)
 	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-		if (adc_values[i] >= GLOBAL_adc_correction) {adc_values[i] = adc_values[i] - GLOBAL_adc_correction;}
-		else {adc_values[i] = 0;}
+		//if (adc_values[i] >= GLOBAL_adc_correction) {adc_values[i] = adc_values[i] - GLOBAL_adc_correction;}
+		//else {adc_values[i] = 0;}
 
 		if (adc_values[i] > adc_values_max) {adc_values_max = adc_values[i];}
 		if (adc_values[i] < adc_values_min) {adc_values_min = adc_values[i];}
@@ -308,7 +308,7 @@ void isr() {
 
 void button_click_handler() {
   Serial.print("Click\n");
-	get_adc();
+	measure_flicker();
 }
 
 void button_holded_handler() {
@@ -332,7 +332,7 @@ void show_startup_screen_and_get_correction() {
 	tft.setTextSize(1);
 	tft.println((String)"NPLM v0.0.1");
 	GLOBAL_adc_correction = get_adc_correction_value(CORRECTION_NUM_SAMPLES);
-	tft.println((String)"Correction: "+GLOBAL_adc_correction);
+	//tft.println((String)"Correction: "+GLOBAL_adc_correction);
 	delay(1000);
 }
 
@@ -362,10 +362,10 @@ void setup(void) {
   tft.fillScreen(ST77XX_BLACK);
 
 
-	//show_startup_screen_and_get_correction();
+	show_startup_screen_and_get_correction();
 
 	//ts.add(0, 2000, [&](void *) { measure_light(); }, nullptr, true);
-	ts.add(1, 100, [&](void *) { get_adc(); }, nullptr, true);
+	ts.add(1, 100, [&](void *) { measure_flicker(); }, nullptr, true);
 
 
 }
