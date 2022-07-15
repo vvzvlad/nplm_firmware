@@ -1,0 +1,22 @@
+
+
+
+
+-------conver assets to .h files----------
+img2h (javasript version): https://github.com/javl/image2cpp/blob/master/index.html
+img2h (microsoft studio cpp version): https://www.codeproject.com/Articles/5336116/Img2Cpp-Create-Cplusplus-Headers-for-Embedding-Ima
+
+
+github:
+https://github.com/liyanboy74/bmp24-to-rgb565
+https://github.com/plerros/pixmap565
+--> https://github.com/CommanderRedYT/rgb565-converter
+
+python:
+https://stackoverflow.com/questions/19131556/how-to-get-rgb888-24-bit-and-rgb565-16-bit-framebuffer-dump-from-a-jpg-ima
+https://github.com/jimmywong2003/PNG-to-RGB565
+http://www.penguintutor.com/programming/picodisplayanimations
+
+
+about bmp: https://medium.com/sysf/bits-to-bitmaps-a-simple-walkthrough-of-bmp-image-format-765dc6857393
+https://en.wikipedia.org/wiki/BMP_file_format
