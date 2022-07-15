@@ -48,22 +48,22 @@ TickerScheduler ts(5);
 
 #define MAX_FREQ 300
 
-uint16_t adc_values[MEASURE_NUM_SAMPLES] = {};
-
-uint16_t adc_values_correction = 0;
+uint16_t GLOBAL_adc_correction = 0;
 
 
-void get_adc_correction_value() {
+
+uint16_t get_adc_correction_value(uint16_t samples) {
 	uint32_t adc_values_sum = 0;
 
-	for (uint16_t i=0; i<CORRECTION_NUM_SAMPLES; i++) {
+	for (uint16_t i=0; i<samples; i++) {
 		adc_values_sum = adc_values_sum + system_adc_read();
 	}
-	adc_values_correction = adc_values_sum/CORRECTION_NUM_SAMPLES;
-	Serial.print("Correction:");
-	Serial.print(adc_values_correction);
-	Serial.print("\n\n");
+	uint16_t correction_value = adc_values_sum/samples;
+	//Serial.print("Correction:");
+	//Serial.print(correction_value);
+	//Serial.print("\n\n");
 
+	return correction_value;
 }
 
 float calc_frequency(uint16_t *adc_values_array, uint16_t adc_values_min_max_mean, uint32_t catch_time_us) {
@@ -140,7 +140,7 @@ float calc_frequency(uint16_t *adc_values_array, uint16_t adc_values_min_max_mea
 }
 
 
-void make_graph(uint16_t adc_values_max) {
+void make_graph(uint16_t *adc_values_array, uint16_t adc_values_max) {
 	uint8_t graph_values[GRAPH_WIDTH] = {};
 	//uint16_t adc_values_max = 0;
 	uint8_t adc_values_multiplier = 0;
@@ -154,10 +154,10 @@ void make_graph(uint16_t adc_values_max) {
 
 
 	for (uint16_t i=0; i < GRAPH_WIDTH; i++) {
-		graph_values[i] = (adc_values[i*GRAPH_WIDTH_DIVIDER+0]*adc_values_multiplier+
-												adc_values[i*GRAPH_WIDTH_DIVIDER+1]*adc_values_multiplier+
-												adc_values[i*GRAPH_WIDTH_DIVIDER+2]*adc_values_multiplier+
-												adc_values[i*GRAPH_WIDTH_DIVIDER+3]*adc_values_multiplier)
+		graph_values[i] = (adc_values_array[i*GRAPH_WIDTH_DIVIDER+0]*adc_values_multiplier+  //Take 4 values (=GRAPH_WIDTH_DIVIDER)
+												adc_values_array[i*GRAPH_WIDTH_DIVIDER+1]*adc_values_multiplier+ //from the adc values array at a time
+												adc_values_array[i*GRAPH_WIDTH_DIVIDER+2]*adc_values_multiplier+ //and collapse them into one
+												adc_values_array[i*GRAPH_WIDTH_DIVIDER+3]*adc_values_multiplier)
 												/GRAPH_WIDTH_DIVIDER/GRAPH_HEIGHT_DIVIDER;
 		if (graph_values[i] > 50) {graph_values[i] = 50;}
 	}
@@ -188,6 +188,7 @@ void make_graph(uint16_t adc_values_max) {
 }
 
 void get_adc() {
+	uint16_t adc_values[MEASURE_NUM_SAMPLES] = {};
 	uint16_t adc_values_max = 0;
 	uint16_t adc_values_min = 1024;
 	uint16_t adc_values_avg = 0;
@@ -217,21 +218,21 @@ void get_adc() {
 	adc_values_sum = 0;
 	//The next measurement will occur in the middle of the wave
 
-	//Непосредственно измерение
+	//The measurement itself
 	catch_start_time = micros();
 	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
 		adc_values[i] = system_adc_read();
 	}
 	catch_stop_time = micros();
 	catch_time_us = catch_stop_time-catch_start_time;
-	//Окончание измерения
+	//End of measurement
 
 	//Allow interrupts back
 	interrupts();
 	ets_intr_unlock(); //open interrupt
 	system_soft_wdt_restart();
 
-	//Дебаг вывод буфера измерений
+	//Debug output of the measurement buffer
 	//Serial.print("adc_values:\n");
 	//for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
 	//	Serial.print(adc_values[i]);
@@ -239,9 +240,9 @@ void get_adc() {
 	//}
 	//Serial.print("\n");
 
-	//Подсчет максимального, минимального, среднего, среднего между максимальным и минимальным значением(для измерения частоты)
+	//Calculating the maximum, minimum, average, average between the maximum and minimum values (for frequency measure)
 	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-		if (adc_values[i] >= adc_values_correction) {adc_values[i] = adc_values[i] - adc_values_correction;}
+		if (adc_values[i] >= GLOBAL_adc_correction) {adc_values[i] = adc_values[i] - GLOBAL_adc_correction;}
 		else {adc_values[i] = 0;}
 
 		if (adc_values[i] > adc_values_max) {adc_values_max = adc_values[i];}
@@ -269,7 +270,7 @@ void get_adc() {
 	//Serial.print(", min:");
 	//Serial.print(adc_values_min);
 	//Serial.print(", correction:");
-	//Serial.print(adc_values_correction);
+	//Serial.print(GLOBAL_adc_correction);
 	//Serial.print(", flicker_gost:");
 	//Serial.print(flicker_gost);
 	//Serial.print(", flicker_simple:");
@@ -281,7 +282,7 @@ void get_adc() {
 	tft.setTextSize(1);
 	tft.println((String)"Flicker GOST:"+flicker_gost);
 	tft.println((String)"Flicker simple:"+flicker_simple);
-	tft.println((String)"Correction:"+adc_values_correction);
+	tft.println((String)"Correction:"+GLOBAL_adc_correction);
 	tft.println((String)"Average:"+adc_values_avg);
 	tft.println((String)"Max:"+adc_values_max);
 	tft.println((String)"Min:"+adc_values_min);
@@ -290,7 +291,7 @@ void get_adc() {
 	tft.println((String)"Light:"+LightSensor.GetLightIntensity()+" lx");
 
 
-	make_graph(adc_values_max);
+	make_graph(adc_values, adc_values_max);
 }
 
 
@@ -324,12 +325,26 @@ void myClicks() {
 }
 
 
-void setup(void) {
-	WiFi.persistent(false); //Отключить запись настроек wifi во флеш
-	WiFi.mode(WIFI_OFF); //отключить wifi
-	WiFi.forceSleepBegin(); //отключить радиомодуль
+void show_startup_screen_and_get_correction() {
+  tft.fillRoundRect(0, 0, ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT, 0, ST7735_TFT_BLACK);
+	tft.setCursor(0, 0);
+	tft.setTextColor(ST7735_TFT_GREEN, ST7735_TFT_BLACK);
+	tft.setTextSize(1);
+	tft.println((String)"NPLM v0.0.1");
+	GLOBAL_adc_correction = get_adc_correction_value(CORRECTION_NUM_SAMPLES);
+	tft.println((String)"Correction: "+GLOBAL_adc_correction);
+	delay(1000);
+}
 
-	//attachInterrupt(BUTTON_PIN, isr, CHANGE); //прерывания кнопки
+
+
+
+void setup(void) {
+	WiFi.persistent(false); //Disable wifi settings recording in flash
+	WiFi.mode(WIFI_OFF); //Deactivate wifi
+	WiFi.forceSleepBegin(); //Disable radio module
+
+	//attachInterrupt(BUTTON_PIN, isr, CHANGE); //button interrupt
 	btn.setButtonLevel(HIGH);
 	btn.setHoldTimeout(1000);
 	btn.attach(CLICK_HANDLER, button_click_handler);
@@ -346,7 +361,8 @@ void setup(void) {
   tft.initR(INITR_BLACKTAB);
   tft.fillScreen(ST77XX_BLACK);
 
-	//get_adc_correction_value();
+
+	//show_startup_screen_and_get_correction();
 
 	//ts.add(0, 2000, [&](void *) { measure_light(); }, nullptr, true);
 	ts.add(1, 100, [&](void *) { get_adc(); }, nullptr, true);
