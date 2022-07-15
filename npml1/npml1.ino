@@ -8,6 +8,8 @@
 
 #include <ESP8266WiFi.h>
 
+//Debug: Serial.println(__LINE__);
+
 #define ST7735_TFT_CS         4 		//D2  //белый
 #define ST7735_TFT_RST        -1  	//желтый
 #define ST7735_TFT_DC         5 		//D1  //синий
@@ -52,13 +54,16 @@ uint16_t GLOBAL_adc_correction = 0;
 
 
 
-uint16_t get_adc_correction_value(uint16_t samples) {
+uint16_t get_adc_correction_value(uint16_t correction_catch_time_ms) {
 	uint32_t adc_values_sum = 0;
+	uint8_t one_step_time_ms = 10;
+	uint16_t steps = correction_catch_time_ms/one_step_time_ms;
 
-	for (uint16_t i=0; i<samples; i++) {
+	for (uint16_t i=0; i<steps; i++) {
 		adc_values_sum = adc_values_sum + system_adc_read();
+		delay(one_step_time_ms);
 	}
-	uint16_t correction_value = adc_values_sum/samples;
+	uint16_t correction_value = adc_values_sum/steps;
 	//Serial.print("Correction:");
 	//Serial.print(correction_value);
 	//Serial.print("\n\n");
@@ -142,14 +147,10 @@ float calc_frequency(uint16_t *adc_values_array, uint16_t adc_values_min_max_mea
 
 void make_graph(uint16_t *adc_values_array, uint16_t adc_values_max) {
 	uint8_t graph_values[GRAPH_WIDTH] = {};
-	//uint16_t adc_values_max = 0;
 	uint8_t adc_values_multiplier = 0;
 
-	//for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-	//	if (adc_values[i] > adc_values_max) {adc_values_max = adc_values[i];}
-	//}
-
 	adc_values_max = adc_values_max/100*10+adc_values_max;
+	if (adc_values_max == 0) { adc_values_max = 1; };
 	adc_values_multiplier = 1024/adc_values_max;
 
 
@@ -159,7 +160,7 @@ void make_graph(uint16_t *adc_values_array, uint16_t adc_values_max) {
 												adc_values_array[i*GRAPH_WIDTH_DIVIDER+2]*adc_values_multiplier+ //and collapse them into one
 												adc_values_array[i*GRAPH_WIDTH_DIVIDER+3]*adc_values_multiplier)
 												/GRAPH_WIDTH_DIVIDER/GRAPH_HEIGHT_DIVIDER;
-		if (graph_values[i] > 50) {graph_values[i] = 50;}
+		if (graph_values[i] > 50) { graph_values[i] = 50; }
 	}
 
 	for (uint8_t current_colon = GRAPH_X; current_colon < GRAPH_WIDTH; current_colon++) {
@@ -189,7 +190,7 @@ void make_graph(uint16_t *adc_values_array, uint16_t adc_values_max) {
 
 void measure_flicker() {
 	uint16_t adc_values[MEASURE_NUM_SAMPLES] = {};
-	uint16_t adc_values_max = 0;
+	uint16_t adc_values_max = 1;
 	uint16_t adc_values_min = 1024;
 	uint16_t adc_values_avg = 0;
 	uint16_t adc_values_min_max_mean = 0;
@@ -240,11 +241,14 @@ void measure_flicker() {
 	//}
 	//Serial.print("\n");
 
+	//Applying Correction
+	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
+		if (adc_values[i] <= GLOBAL_adc_correction) { adc_values[i] = 0;  }
+		else { adc_values[i] = adc_values[i] - GLOBAL_adc_correction; }
+	}
+
 	//Calculating the maximum, minimum, average, average between the maximum and minimum values (for frequency measure)
 	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-		//if (adc_values[i] >= GLOBAL_adc_correction) {adc_values[i] = adc_values[i] - GLOBAL_adc_correction;}
-		//else {adc_values[i] = 0;}
-
 		if (adc_values[i] > adc_values_max) {adc_values_max = adc_values[i];}
 		if (adc_values[i] < adc_values_min) {adc_values_min = adc_values[i];}
 		adc_values_sum = adc_values_sum + adc_values[i];
@@ -288,8 +292,7 @@ void measure_flicker() {
 	tft.println((String)"Min:"+adc_values_min);
 	//tft.println((String)"Tm:"+((float)catch_time_us/1000)+"ms");
 	tft.println((String)"Freq:"+freq+" Hz");
-	tft.println((String)"Light:"+LightSensor.GetLightIntensity()+" lx");
-
+	//tft.println((String)"Light:"+LightSensor.GetLightIntensity()+" lx");
 
 	make_graph(adc_values, adc_values_max);
 }
@@ -297,9 +300,11 @@ void measure_flicker() {
 
 void measure_light() {
   uint16_t lux = LightSensor.GetLightIntensity();
-  Serial.print("Light: ");
-  Serial.print(lux);
-  Serial.print(" lX\n");
+
+  tft.setCursor(0, 0);
+	tft.setTextColor(ST7735_TFT_GREEN, ST7735_TFT_BLACK);
+	tft.setTextSize(1);
+	tft.println((String)"Light:"+lux+" lx");
 }
 
 void isr() {
@@ -331,9 +336,10 @@ void show_startup_screen_and_get_correction() {
 	tft.setTextColor(ST7735_TFT_GREEN, ST7735_TFT_BLACK);
 	tft.setTextSize(1);
 	tft.println((String)"NPLM v0.0.1");
-	GLOBAL_adc_correction = get_adc_correction_value(CORRECTION_NUM_SAMPLES);
-	//tft.println((String)"Correction: "+GLOBAL_adc_correction);
-	delay(1000);
+	tft.println((String)"Calibration... ");
+	GLOBAL_adc_correction = get_adc_correction_value(2000);
+	tft.println((String)"Correction: "+GLOBAL_adc_correction);
+	//delay(1000);
 }
 
 
@@ -364,8 +370,8 @@ void setup(void) {
 
 	show_startup_screen_and_get_correction();
 
-	//ts.add(0, 2000, [&](void *) { measure_light(); }, nullptr, true);
-	ts.add(1, 100, [&](void *) { measure_flicker(); }, nullptr, true);
+	ts.add(0, 200, [&](void *) { measure_light(); }, nullptr, true);
+	//ts.add(1, 100, [&](void *) { measure_flicker(); }, nullptr, true);
 
 
 }
