@@ -1,7 +1,5 @@
 #include <assets.h>
 
-const asset_t test_asset ICACHE_RODATA_ATTR = { 128, 39, { 128, 39, } };
-
 const asset_t flicker_msg_bad_lamp ICACHE_RODATA_ATTR = {
   128, 39,
   {

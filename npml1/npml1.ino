@@ -60,16 +60,7 @@ uint16_t GLOBAL_adc_correction = 0;
 void draw_asset(const asset_t *asset, uint8_t x, uint8_t y) {
   uint8_t h = pgm_read_byte(&asset->height);
 	uint8_t w = pgm_read_byte(&asset->width);
-	uint16_t buffidx = 0;
-
 	tft.drawRGBBitmap(x, y, asset->image, w, h);
-
-  //for (uint8_t row=x; row<h; row++) {
-  //  for (uint8_t col=y; col<w; col++) {
-  //    tft.drawPixel(col, row, pgm_read_word(asset->image + buffidx));
-  //    buffidx++;
-  //  }
-  //}
 }
 
 
@@ -336,7 +327,7 @@ void isr() {
 
 void button_click_handler() {
   Serial.print("Click\n");
-	draw_asset(&flicker_msg_bad_lamp, 0, 0);
+	draw_asset(&flicker_msg_bad_lamp, 0, 15);
 	//measure_flicker();
 }
 

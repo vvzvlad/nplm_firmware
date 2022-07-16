@@ -1011,6 +1011,17 @@ void Adafruit_SPITFT::writePixels(uint16_t *colors, uint32_t len, bool block,
     }
     return;
   }
+#elif defined(ESP8266)
+  if (connection == TFT_HARD_SPI) {
+    if (!bigEndian) {
+      swapBytes(colors, len); // convert little-to-big endian for display
+    }
+    hwspi._spi->writeBytes((uint8_t *)colors, len * 2);
+    if (!bigEndian) {
+      swapBytes(colors, len); // big-to-little endian to restore pixel buffer
+    }
+    return;
+  }
 #elif defined(ARDUINO_NRF52_ADAFRUIT) &&                                       \
     defined(NRF52840_XXAA) // Adafruit nRF52 use SPIM3 DMA at 32Mhz
   if (!bigEndian) {
@@ -1168,6 +1179,19 @@ void Adafruit_SPITFT::dmaWait(void) {
     pinPeripheral(tft8._wr, PIO_OUTPUT); // Switch WR back to GPIO
   }
 #endif // end __SAMD51__ || ARDUINO_SAMD_ZERO
+#endif
+}
+
+/*!
+    @brief  Check if DMA transfer is active. Always returts false if DMA
+            is not enabled.
+    @return true if DMA is enabled and transmitting data, false otherwise.
+*/
+bool Adafruit_SPITFT::dmaBusy(void) const {
+#if defined(USE_SPI_DMA) && (defined(__SAMD51__) || defined(ARDUINO_SAMD_ZERO))
+  return dma_busy;
+#else
+  return false;
 #endif
 }
 

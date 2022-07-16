@@ -10,7 +10,7 @@
 (не помогло)
 
 
-Прямая запись через SPI: http://blog.dzl.dk/2020/04/04/crazy-fast-tft-action-with-adafruit-gfx-and-esp32/
+Выглядит очень хорошо --> Прямая запись через SPI: http://blog.dzl.dk/2020/04/04/crazy-fast-tft-action-with-adafruit-gfx-and-esp32/
 
 
 
@@ -22,7 +22,7 @@ img2h (microsoft studio cpp version): https://www.codeproject.com/Articles/53361
 github:
 https://github.com/liyanboy74/bmp24-to-rgb565
 https://github.com/plerros/pixmap565
---> https://github.com/CommanderRedYT/rgb565-converter
+выбрана в итоге эта --> https://github.com/CommanderRedYT/rgb565-converter
 python3 ./common/rgb565_converter.py --input ./assets/flicker_msg_bad_lamp.png --output ./assets/flicker_msg_bad_lamp.cpp
 
 python:
