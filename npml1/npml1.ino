@@ -9,7 +9,6 @@
 #include <TickerScheduler.h>
 #include <EncButton.h>
 
-#include <assets.h>
 #include <images.h>
 
 //Debug: Serial.println(__LINE__);
@@ -44,7 +43,7 @@ TickerScheduler ts(5);
 #define GRAPH_WIDTH 						ST7735_TFT_WIDTH
 #define GRAPH_HEIGHT 						50
 #define GRAPH_WIDTH_DIVIDER 		4   // 512(samples number, MEASURE_NUM_SAMPLES) -> 128 (chart width, GRAPH_WIDTH)
-#define GRAPH_HEIGHT_DIVIDER 		20 // 1024(single-count resolution, MAX_ADC_VALUE) ->  50(chart height, GRAPH_HEIGHT)
+#define GRAPH_HEIGHT_DIVIDER 		20  // 1024(single-count resolution, MAX_ADC_VALUE) ->  50(chart height, GRAPH_HEIGHT)
 #define GRAPH_X 								0
 #define GRAPH_Y 								ST7735_TFT_HEIGHT-GRAPH_HEIGHT
 
@@ -56,6 +55,20 @@ TickerScheduler ts(5);
 #define MAX_FREQ 								300
 
 uint16_t GLOBAL_adc_correction = 0;
+
+
+void draw_asset(const asset_t *asset, uint8_t x, uint8_t y) {
+  uint8_t h = pgm_read_byte(&asset->height);
+	uint8_t w = pgm_read_byte(&asset->width);
+	uint16_t buffidx = 0;
+
+  for (uint8_t row=x; row<h; row++) {
+    for (uint8_t col=y; col<w; col++) {
+      tft.drawPixel(col, row, pgm_read_word(asset->image + buffidx));
+      buffidx++;
+    }
+  }
+}
 
 
 
@@ -321,7 +334,8 @@ void isr() {
 
 void button_click_handler() {
   Serial.print("Click\n");
-	measure_flicker();
+	draw_asset(&flicker_msg_bad_lamp, 0, 0);
+	//measure_flicker();
 }
 
 void button_holded_handler() {
