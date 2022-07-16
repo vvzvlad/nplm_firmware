@@ -11,6 +11,7 @@ github:
 https://github.com/liyanboy74/bmp24-to-rgb565
 https://github.com/plerros/pixmap565
 --> https://github.com/CommanderRedYT/rgb565-converter
+python3 ./common/rgb565_converter.py --input ./assets/flicker_msg_bad_lamp.png --output ./assets/flicker_msg_bad_lamp.cpp
 
 python:
 https://stackoverflow.com/questions/19131556/how-to-get-rgb888-24-bit-and-rgb565-16-bit-framebuffer-dump-from-a-jpg-ima

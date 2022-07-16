@@ -9,6 +9,8 @@
 #include <TickerScheduler.h>
 #include <EncButton.h>
 
+#include <assets.h>
+#include <images.h>
 
 //Debug: Serial.println(__LINE__);
 
