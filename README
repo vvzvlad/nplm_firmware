@@ -1,5 +1,17 @@
 
 
+-------spees issues----------
+По-видимому, дело в в том, что даже drawRGBBitmap в Adafruit_GFX.cpp#L1001 использует writePixel, вместо writeFastVLine/writeFastHLine как в drawRect.
+Или writeFastVLine тоже в итоге приводятся к writePixel? 
+
+Каким-то образом добиваются 60FPS на похожем экране SSD1351 128x128  https://github.com/bountylabs/blocks-with-screens
+
+задействует аппаратное SPI: https://github.com/adafruit/Adafruit-GFX-Library/pull/370
+(не помогло)
+
+
+Прямая запись через SPI: http://blog.dzl.dk/2020/04/04/crazy-fast-tft-action-with-adafruit-gfx-and-esp32/
+
 
 
 -------conver assets to .h files----------

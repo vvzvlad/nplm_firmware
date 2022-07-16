@@ -62,12 +62,14 @@ void draw_asset(const asset_t *asset, uint8_t x, uint8_t y) {
 	uint8_t w = pgm_read_byte(&asset->width);
 	uint16_t buffidx = 0;
 
-  for (uint8_t row=x; row<h; row++) {
-    for (uint8_t col=y; col<w; col++) {
-      tft.drawPixel(col, row, pgm_read_word(asset->image + buffidx));
-      buffidx++;
-    }
-  }
+	tft.drawRGBBitmap(x, y, asset->image, w, h);
+
+  //for (uint8_t row=x; row<h; row++) {
+  //  for (uint8_t col=y; col<w; col++) {
+  //    tft.drawPixel(col, row, pgm_read_word(asset->image + buffidx));
+  //    buffidx++;
+  //  }
+  //}
 }
 
 
