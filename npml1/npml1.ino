@@ -1,5 +1,6 @@
 #include <ESP8266WiFi.h>
 
+
 #include <Adafruit_GFX.h>    // Core graphics library
 #include <Adafruit_ST7735.h> // Hardware-specific library for ST7735
 #include <SPI.h>
@@ -8,6 +9,7 @@
 
 #include <TickerScheduler.h>
 #include <EncButton.h>
+#include <framebuffer.h>
 
 #include <images.h>
 
@@ -17,12 +19,6 @@
 #define ST7735_TFT_RST        	-1  	//желтый
 #define ST7735_TFT_DC         	5 		//D1  //синий
 #define BUTTON_PIN         			16
-
-Adafruit_ST7735 tft = Adafruit_ST7735(ST7735_TFT_CS, ST7735_TFT_DC, ST7735_TFT_RST);
-BH1750FVI LightSensor(BH1750FVI::k_DevModeContLowRes);
-EncButton<EB_CALLBACK, BUTTON_PIN> btn(INPUT);
-
-TickerScheduler ts(5);
 
 //Screen resolution
 #define ST7735_TFT_WIDTH 				128
@@ -54,58 +50,21 @@ TickerScheduler ts(5);
 
 #define MAX_FREQ 								300
 
+
+Adafruit_ST7735 tft = Adafruit_ST7735(ST7735_TFT_CS, ST7735_TFT_DC, ST7735_TFT_RST);
+BH1750FVI LightSensor(BH1750FVI::k_DevModeContLowRes);
+EncButton<EB_CALLBACK, BUTTON_PIN> btn(INPUT);
+aFrameBuffer frame(ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT, &tft, ST7735_TFT_CS, ST7735_TFT_DC);
+TickerScheduler ts(5);
+
+
 uint16_t GLOBAL_adc_correction = 0;
 
-class  aFrameBuffer : public Adafruit_GFX {
-  public:
-    uint16_t *buffer;
-    aFrameBuffer(int16_t w, int16_t h): Adafruit_GFX(w, h)
-    {
-      buffer = (uint16_t*)malloc(2 * h * w);
-      for (int i = 0; i < h * w; i++)
-        buffer[i] = 0;
 
-      tft.initR(INITR_BLACKTAB);
-      //tft.setRotation(1);
-      tft.fillScreen(ST7735_TFT_BLACK);
-    }
-    void drawPixel( int16_t x, int16_t y, uint16_t color)
-    {
-      if (x > 127)
-        return;
-      if (x < 0)
-        return;
-      if (y > 159)
-        return;
-      if (y < 0)
-        return;
-      buffer[x + y * _width] = color;
-    }
-
-    void display()
-    {
-      tft.setAddrWindow(0, 0, 128, 160);
-      digitalWrite(ST7735_TFT_DC, HIGH);
-      digitalWrite(ST7735_TFT_CS, LOW);
-      SPI.beginTransaction(SPISettings(80000000, MSBFIRST, SPI_MODE0));
-      for (uint16_t i = 0; i < 128 * 160; i++)
-      {
-        SPI.write16(buffer[i]);
-      }
-      SPI.endTransaction();
-      digitalWrite(ST7735_TFT_CS, HIGH);
-    }
-};
-
-
-
-
-
-
-void draw_asset(aFrameBuffer *frame, const asset_t *asset, uint8_t x, uint8_t y) {
+void draw_asset(const asset_t *asset, uint8_t x, uint8_t y) {
   uint8_t h = pgm_read_byte(&asset->height);
 	uint8_t w = pgm_read_byte(&asset->width);
-	frame->drawRGBBitmap(x, y, asset->image, w, h);
+	frame.drawRGBBitmap(x, y, asset->image, w, h);
 }
 
 
@@ -428,8 +387,8 @@ void setup(void) {
   //tft.initR(INITR_BLACKTAB);
   //tft.fillScreen(ST77XX_BLACK);
 
-	aFrameBuffer frame(128, 160);
-	draw_asset(&frame, &flicker_msg_good_lamp, 0, 15);
+	frame.init();
+	draw_asset(&flicker_msg_good_lamp, 0, 15);
 	frame.display();
 
 
