@@ -327,7 +327,7 @@ void isr() {
 
 void button_click_handler() {
   Serial.print("Click\n");
-	draw_asset(&flicker_msg_bad_lamp, 0, 15);
+	draw_asset(&flicker_msg_good_lamp, 0, 15);
 	//measure_flicker();
 }
 

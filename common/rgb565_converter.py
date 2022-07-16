@@ -32,7 +32,18 @@ def main():
         print("Error: Invalid arguments.")
         exit(1)
 
-    convert_png_to_rgb565(args.output_file, args.input_file)
+    with open(args.output_file, 'w') as output_file:
+        output_file.write("#include <assets.h> \n\n")
+
+    path_of_the_directory= args.input_file
+    for filename in os.listdir(path_of_the_directory):
+        f = os.path.join(path_of_the_directory,filename)
+        if os.path.isfile(f):
+            extension = os.path.basename(f).rsplit('.', 1)[1]
+            if extension == "png":
+                print("Converting: "+f)
+                convert_png_to_rgb565(args.output_file, f)
+
 
 def convert_png_to_rgb565(output_file, input_file):
     array_name = os.path.basename(input_file).rsplit('.', 1)[0]
@@ -54,9 +65,8 @@ def convert_png_to_rgb565(output_file, input_file):
     if image_content.endswith("\n    "):
         image_content = image_content[:-5]
 
-
     output_cpp_content = f"""
-#include <assets.h>
+
 
 const asset_t {array_name} ICACHE_RODATA_ATTR =
 {{
@@ -67,7 +77,7 @@ const asset_t {array_name} ICACHE_RODATA_ATTR =
 }};
     """.strip() + "\n"
 
-    with open(output_file, 'w') as output_file:
+    with open(output_file, 'a') as output_file:
         output_file.write(output_cpp_content)
 
 
