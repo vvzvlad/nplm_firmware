@@ -56,6 +56,51 @@ TickerScheduler ts(5);
 
 uint16_t GLOBAL_adc_correction = 0;
 
+class  aFrameBuffer : public Adafruit_GFX {
+  public:
+    uint16_t *buffer;
+    aFrameBuffer(int16_t w, int16_t h): Adafruit_GFX(w, h)
+    {
+      buffer = (uint16_t*)malloc(2 * h * w);
+      for (int i = 0; i < h * w; i++)
+        buffer[i] = 0;
+
+      tft.initR(INITR_BLACKTAB);
+      tft.setRotation(1);
+      tft.fillScreen(ST77XX_BLACK);
+    }
+    void drawPixel( int16_t x, int16_t y, uint16_t color)
+    {
+      if (x > 159)
+        return;
+      if (x < 0)
+        return;
+      if (y > 127)
+        return;
+      if (y < 0)
+        return;
+      buffer[x + y * _width] = color;
+    }
+
+    void display()
+    {
+      tft.setAddrWindow(0, 0, 160, 128);
+      digitalWrite(ST7735_TFT_DC, HIGH);
+      digitalWrite(ST7735_TFT_CS, LOW);
+      SPI.beginTransaction(SPISettings(80000000, MSBFIRST, SPI_MODE0));
+      for (uint16_t i = 0; i < 160 * 128; i++)
+      {
+        SPI.write16(buffer[i]);
+      }
+      SPI.endTransaction();
+      digitalWrite(ST7735_TFT_CS, HIGH);
+    }
+};
+
+aFrameBuffer frame(160, 128);
+
+
+
 
 void draw_asset(const asset_t *asset, uint8_t x, uint8_t y) {
   uint8_t h = pgm_read_byte(&asset->height);
@@ -384,7 +429,7 @@ void setup(void) {
   tft.fillScreen(ST77XX_BLACK);
 
 
-	show_startup_screen_and_get_correction();
+	//show_startup_screen_and_get_correction();
 
 	ts.add(0, 200, [&](void *) { measure_light(); }, nullptr, true);
 	//ts.add(1, 100, [&](void *) { measure_flicker(); }, nullptr, true);
