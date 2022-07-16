@@ -12,8 +12,8 @@ def main():
         "-i",
         "--input",
         required=True,
-        dest="input_file",
-        help="Input file to be converted."
+        dest="input_directory",
+        help="Input directory to be converted."
     )
     parser.add_argument(
         "-o",
@@ -24,7 +24,6 @@ def main():
     )
     args = parser.parse_args()
 
-    input_basename = os.path.basename(args.input_file).rsplit('.', 1)
 
     output_basename = os.path.basename(args.output_file).rsplit('.', 1)
 
@@ -35,7 +34,7 @@ def main():
     with open(args.output_file, 'w') as output_file:
         output_file.write("#include <assets.h> \n\n")
 
-    path_of_the_directory= args.input_file
+    path_of_the_directory= args.input_directory
     for filename in os.listdir(path_of_the_directory):
         f = os.path.join(path_of_the_directory,filename)
         if os.path.isfile(f):
