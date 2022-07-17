@@ -51,7 +51,7 @@
 
 typedef Adafruit_ST7735 display_t;
 typedef Adafruit_GFX_Buffer<display_t> GFXBuffer_t;
-GFXBuffer_t tft = GFXBuffer_t(128, 160, display_t(ST7735_TFT_CS, ST7735_TFT_DC, ST7735_TFT_RST));
+GFXBuffer_t framebuffer = GFXBuffer_t(128, 160, display_t(ST7735_TFT_CS, ST7735_TFT_DC, ST7735_TFT_RST));
 BH1750FVI LightSensor(BH1750FVI::k_DevModeContLowRes);
 EncButton<EB_CALLBACK, BUTTON_PIN> btn(INPUT);
 TickerScheduler ts(5);
@@ -62,8 +62,8 @@ uint16_t GLOBAL_adc_correction = 0;
 void draw_asset(const asset_t *asset, uint8_t x, uint8_t y) {
   uint8_t h = pgm_read_byte(&asset->height);
 	uint8_t w = pgm_read_byte(&asset->width);
-	tft.drawRGBBitmap(x, y, asset->image, w, h);
-	tft.display();
+	framebuffer.drawRGBBitmap(x, y, asset->image, w, h);
+	framebuffer.display();
 }
 
 
@@ -99,7 +99,8 @@ float calc_frequency(uint16_t *adc_values_array, uint16_t adc_values_min_max_mea
 			if (adc_values_array[i] > adc_values_min_max_mean)
 			{
 				//Serial.println((String)"i:"+i+", adc_values_array:"+adc_values_array[i]);
-				//tft.drawLine(i/GRAPH_WIDTH_DIVIDER, 110, i/GRAPH_WIDTH_DIVIDER, 160, ST7735_TFT_CYAN);
+				//framebuffer.drawLine(i/GRAPH_WIDTH_DIVIDER, 110, i/GRAPH_WIDTH_DIVIDER, 160, ST7735_TFT_CYAN);
+				//framebuffer.display();
 				acc = i+20;
 				not_found_flag = 0;
 				break;
@@ -112,8 +113,9 @@ float calc_frequency(uint16_t *adc_values_array, uint16_t adc_values_min_max_mea
 
 			if (adc_values_array[i] < adc_values_min_max_mean)
 			{
-				//tft.drawLine(i/GRAPH_WIDTH_DIVIDER, 110, i/GRAPH_WIDTH_DIVIDER, 160, ST7735_TFT_CYAN);
+				//framebuffer.drawLine(i/GRAPH_WIDTH_DIVIDER, 110, i/GRAPH_WIDTH_DIVIDER, 160, ST7735_TFT_CYAN);
 				//Serial.println((String)"i:"+i+", adc_values_array:"+adc_values_array[i]);
+				//framebuffer.display();
 				adc_mean_values[adc_mean_values_i] = i;
 				adc_mean_values_i++;
 				acc = i+20;
@@ -179,19 +181,20 @@ void make_graph(uint16_t *adc_values_array, uint16_t adc_values_max) {
 	}
 
 	for (uint8_t current_colon = GRAPH_X; current_colon < GRAPH_WIDTH; current_colon++) {
-		tft.drawLine(current_colon, GRAPH_Y, current_colon, ST7735_TFT_HEIGHT, ST7735_TFT_BLACK); //old graph colon-by-colon clearing
+		framebuffer.drawLine(current_colon, GRAPH_Y, current_colon, ST7735_TFT_HEIGHT, ST7735_TFT_BLACK); //old graph colon-by-colon clearing
 		if (current_colon == 0) {
-			tft.drawPixel(current_colon, //The first point is drawn as a pixel because it has no past point
+			framebuffer.drawPixel(current_colon, //The first point is drawn as a pixel because it has no past point
 										ST7735_TFT_HEIGHT-graph_values[current_colon],
 										ST7735_TFT_GREEN);
 		}
 		else {
-			tft.drawLine(current_colon-1,  //The following points are drawn as lines to prevent gaps between individual points on steep hillsides
+			framebuffer.drawLine(current_colon-1,  //The following points are drawn as lines to prevent gaps between individual points on steep hillsides
 										ST7735_TFT_HEIGHT-graph_values[current_colon-1],
 										current_colon,
 										ST7735_TFT_HEIGHT-graph_values[current_colon],
 										ST7735_TFT_GREEN);
 		}
+		framebuffer.display();
 	}
 
 
@@ -297,19 +300,20 @@ void measure_flicker() {
 	//Serial.print(", flicker_simple:");
 	//Serial.print(flicker_simple);
 
-	//tft.fillRoundRect(0, 0, 128, 110, 0, ST7735_TFT_BLACK);
-	tft.setCursor(0, 0);
-	tft.setTextColor(ST7735_TFT_GREEN, ST7735_TFT_BLACK); //The first argument is the font color, the second is the background color.
-	tft.setTextSize(1);
-	tft.println((String)"Flicker GOST:"+flicker_gost);
-	tft.println((String)"Flicker simple:"+flicker_simple);
-	tft.println((String)"Correction:"+GLOBAL_adc_correction);
-	tft.println((String)"Average:"+adc_values_avg);
-	tft.println((String)"Max:"+adc_values_max);
-	tft.println((String)"Min:"+adc_values_min);
-	//tft.println((String)"Tm:"+((float)catch_time_us/1000)+"ms");
-	tft.println((String)"Freq:"+freq+" Hz");
-	//tft.println((String)"Light:"+LightSensor.GetLightIntensity()+" lx");
+	//framebuffer.fillRoundRect(0, 0, 128, 110, 0, ST7735_TFT_BLACK);
+	framebuffer.setCursor(0, 0);
+	framebuffer.setTextColor(ST7735_TFT_GREEN, ST7735_TFT_BLACK); //The first argument is the font color, the second is the background color.
+	framebuffer.setTextSize(1);
+	framebuffer.println((String)"Flicker GOST:"+flicker_gost);
+	framebuffer.println((String)"Flicker simple:"+flicker_simple);
+	framebuffer.println((String)"Correction:"+GLOBAL_adc_correction);
+	framebuffer.println((String)"Average:"+adc_values_avg);
+	framebuffer.println((String)"Max:"+adc_values_max);
+	framebuffer.println((String)"Min:"+adc_values_min);
+	//framebuffer.println((String)"Tm:"+((float)catch_time_us/1000)+"ms");
+	framebuffer.println((String)"Freq:"+freq+" Hz");
+	//framebuffer.println((String)"Light:"+LightSensor.GetLightIntensity()+" lx");
+	framebuffer.display();
 
 	make_graph(adc_values, adc_values_max);
 }
@@ -318,10 +322,11 @@ void measure_flicker() {
 void measure_light() {
   uint16_t lux = LightSensor.GetLightIntensity();
 
-  tft.setCursor(0, 0);
-	tft.setTextColor(ST7735_TFT_GREEN, ST7735_TFT_BLACK);
-	tft.setTextSize(1);
-	tft.println((String)"Light:"+lux+" lx");
+  framebuffer.setCursor(0, 0);
+	framebuffer.setTextColor(ST7735_TFT_GREEN, ST7735_TFT_BLACK);
+	framebuffer.setTextSize(1);
+	framebuffer.println((String)"Light:"+lux+" lx");
+	framebuffer.display();
 }
 
 void isr() {
@@ -330,6 +335,8 @@ void isr() {
 
 void button_click_handler() {
   Serial.print("Click\n");
+	framebuffer.fillScreen(ST77XX_BLACK);
+	framebuffer.display();
 	draw_asset(&flicker_msg_good_lamp, 0, 0);
 	//measure_flicker();
 }
@@ -349,15 +356,17 @@ void myClicks() {
 
 
 void show_startup_screen_and_get_correction() {
-  tft.fillRoundRect(0, 0, ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT, 0, ST7735_TFT_BLACK);
-	tft.setCursor(0, 0);
-	tft.setTextColor(ST7735_TFT_GREEN, ST7735_TFT_BLACK);
-	tft.setTextSize(1);
-	tft.println((String)"NPLM v0.0.1");
-	tft.println((String)"Calibration... ");
+  framebuffer.fillRoundRect(0, 0, ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT, 0, ST7735_TFT_BLACK);
+	framebuffer.setCursor(0, 0);
+	framebuffer.setTextColor(ST7735_TFT_GREEN, ST7735_TFT_BLACK);
+	framebuffer.setTextSize(1);
+	framebuffer.println((String)"NPLM v0.0.1");
+	framebuffer.println((String)"Calibration... ");
+	framebuffer.display();
 	GLOBAL_adc_correction = get_adc_correction_value(2000);
-	tft.println((String)"Correction: "+GLOBAL_adc_correction);
-	tft.fillRoundRect(0, 0, ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT, 0, ST7735_TFT_BLACK);
+	framebuffer.println((String)"Correction: "+GLOBAL_adc_correction);
+	framebuffer.fillRoundRect(0, 0, ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT, 0, ST7735_TFT_BLACK);
+	framebuffer.display();
 	delay(1000);
 }
 
@@ -383,9 +392,9 @@ void setup(void) {
 
   LightSensor.begin();
 
-  tft.initR(INITR_BLACKTAB);
-	tft.fillScreen(ST77XX_BLACK);
-	tft.display();
+  framebuffer.initR(INITR_BLACKTAB);
+	framebuffer.fillScreen(ST77XX_BLACK);
+	framebuffer.display();
 	//draw_asset(&flicker_msg_good_lamp, 0, 0);
 
 
