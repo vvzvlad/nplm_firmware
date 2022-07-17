@@ -3,6 +3,7 @@
 #include <Adafruit_GFX.h>    				// Core graphics library
 #include <Adafruit_ST7735.h> 				// Hardware-specific library for ST7735
 #include <Adafruit_GFX_Buffer.h>		// Framebuffer library to speed up rendering
+#include <utf8rus.h>
 
 #include <SPI.h>
 
@@ -11,6 +12,7 @@
 #include <TickerScheduler.h>
 #include <EncButton.h>
 #include <images.h>
+
 
 //Debug: Serial.println(__LINE__);
 
@@ -85,7 +87,7 @@ uint16_t get_adc_correction_value(uint16_t correction_catch_time_ms) {
 }
 
 
-float calc_frequency(uint16_t *adc_values_array, uint16_t adc_values_min_max_mean, uint32_t catch_time_us) {
+uint16_t calc_frequency(uint16_t *adc_values_array, uint16_t adc_values_min_max_mean, uint32_t catch_time_us) {
 	uint16_t adc_mean_values[MEASURE_NUM_SAMPLES] = {};
 	uint16_t adc_mean_values_i = 0;
 
@@ -157,7 +159,7 @@ float calc_frequency(uint16_t *adc_values_array, uint16_t adc_values_min_max_mea
 	//}
 	//Serial.print("\n");
 
-	return freq;
+	return (uint16_t)freq;
 }
 
 
@@ -212,6 +214,8 @@ void measure_flicker() {
 	uint32_t adc_values_sum = 0;
 	float flicker_gost = 0;
 	float flicker_simple = 0;
+	uint8_t flicker_gost_uint = 0;
+	uint8_t flicker_simple_uint = 0;
 
 	uint32_t catch_start_time = 0;
 	uint32_t catch_stop_time = 0;
@@ -277,9 +281,11 @@ void measure_flicker() {
 	//Flicker level calculation
 	flicker_gost = ((float)adc_values_max-(float)adc_values_min)*100/(2*(float)adc_values_avg);
 	flicker_simple = ((float)adc_values_max-(float)adc_values_min)*100/((float)adc_values_max+(float)adc_values_min);
+	flicker_gost_uint = (uint8_t)flicker_gost;
+	flicker_simple_uint = (uint8_t)flicker_simple;
 
 	//Flicker frequency calculation
-	float freq = calc_frequency(adc_values, adc_values_min_max_mean, catch_time_us);
+	uint16_t freq = calc_frequency(adc_values, adc_values_min_max_mean, catch_time_us);
 
 
 
@@ -297,7 +303,7 @@ void measure_flicker() {
 	//Serial.print(", flicker_simple:");
 	//Serial.print(flicker_simple);
 
-	framebuffer.fillRoundRect(0, 0, 128, 160, 0, ST7735_TFT_BLACK);
+	framebuffer.fillScreen(ST77XX_BLACK);
 
 	if (flicker_simple >= 0 && flicker_simple <= 5) {
 		draw_asset(&flicker_msg_good_lamp, 0, 0);
@@ -311,20 +317,28 @@ void measure_flicker() {
 	else {
 		Serial.println((String)"Flicker simple:"+flicker_simple);
 	}
+	draw_asset(&flicker_rainbow, 0, 39);
+	draw_asset(&arrow, 10, 56);
+	draw_asset(&flicker_text_flicker_level, 0, 61);
 
 
-	framebuffer.setCursor(0, 39);
-	framebuffer.setTextColor(ST7735_TFT_GREEN);
+
+	framebuffer.setCursor(0, 150);
+	framebuffer.setTextColor(ST7735_TFT_WHITE);
 	framebuffer.setTextSize(1);
-	framebuffer.println((String)"Flicker GOST:"+flicker_gost);
-	framebuffer.println((String)"Flicker simple:"+flicker_simple);
-	framebuffer.println((String)"Correction:"+GLOBAL_adc_correction);
+
+	//framebuffer.println((String)"Flicker simple:"+flicker_simple_uint);
+	//framebuffer.println((String)"Correction:"+GLOBAL_adc_correction);
 	//framebuffer.println((String)"Average:"+adc_values_avg);
 	//framebuffer.println((String)"Max:"+adc_values_max);
 	//framebuffer.println((String)"Min:"+adc_values_min);
 	//framebuffer.println((String)"Tm:"+((float)catch_time_us/1000)+"ms");
 	framebuffer.println((String)"Freq:"+freq+" Hz");
 	//framebuffer.println((String)"Light:"+LightSensor.GetLightIntensity()+" lx");
+
+	framebuffer.setCursor(40, 80);
+	framebuffer.setTextSize(3);
+	framebuffer.println((String)flicker_gost_uint+"%");
 
 	make_graph(adc_values, adc_values_max);
 
@@ -335,8 +349,9 @@ void measure_flicker() {
 void measure_light() {
   uint16_t lux = LightSensor.GetLightIntensity();
 
+	framebuffer.fillScreen(ST77XX_BLACK);
   framebuffer.setCursor(0, 0);
-	framebuffer.setTextColor(ST7735_TFT_GREEN, ST7735_TFT_BLACK);
+	framebuffer.setTextColor(ST7735_TFT_WHITE);
 	framebuffer.setTextSize(1);
 	framebuffer.println((String)"Light:"+lux+" lx");
 	framebuffer.display();
@@ -354,6 +369,12 @@ void button_click_handler() {
 	//measure_flicker();
 }
 
+void free_mem_print() {
+	Serial.print("\nFree memory: ");
+  Serial.print(system_get_free_heap_size());
+	Serial.print("\n");
+}
+
 void button_holded_handler() {
   Serial.print("Holded\n");
 }
@@ -367,12 +388,13 @@ void myClicks() {
   Serial.println(btn.clicks);
 }
 
-
 void show_startup_screen_and_get_correction() {
-	framebuffer.setCursor(0, 0);
-	framebuffer.setTextColor(ST7735_TFT_GREEN, ST7735_TFT_BLACK);
+	draw_asset(&boot_screen, 0, 0);
+	framebuffer.setCursor(34, 97);
+	framebuffer.setTextColor(ST7735_TFT_WHITE);
 	framebuffer.setTextSize(1);
-	framebuffer.println((String)"NPLM v0.0.1");
+	framebuffer.println(utf8rus("Загрузка..."));
+	framebuffer.display();
 	//framebuffer.println((String)"Calibration... ");
 	//Serial.print("\n\nNPLM-1 Calibration..");
 	//framebuffer.display();
@@ -381,7 +403,7 @@ void show_startup_screen_and_get_correction() {
 	//framebuffer.display();
 	//Serial.print(GLOBAL_adc_correction);
 	//Serial.print(", OK.\n");
-	delay(1000);
+	delay(5000);
 }
 
 
@@ -404,6 +426,7 @@ void setup(void) {
   LightSensor.begin();
 
   framebuffer.initR(INITR_BLACKTAB);
+	framebuffer.cp437(true);
 	framebuffer.fillScreen(ST77XX_BLACK);
 	framebuffer.display();
 	//
@@ -416,6 +439,7 @@ void setup(void) {
 
 	//ts.add(0, 200, [&](void *) { measure_light(); }, nullptr, true);
 	ts.add(1, 100, [&](void *) { measure_flicker(); }, nullptr, true);
+	ts.add(2, 5000, [&](void *) { free_mem_print(); }, nullptr, true);
 
 
 }
