@@ -1,8 +1,20 @@
 
 
+
+
+
+
+
+
+
+
+
+
+
+Устарело, см. Adafruit_GFX_Buffer. Дело было в больших накладных расходах на запись каждого пикселя. Теперь все рисуется в память(во фреймбуффер), а потом быстро засовывается в экран.
 -------spees issues----------
 По-видимому, дело в в том, что даже drawRGBBitmap в Adafruit_GFX.cpp#L1001 использует writePixel, вместо writeFastVLine/writeFastHLine как в drawRect.
-Или writeFastVLine тоже в итоге приводятся к writePixel? 
+Или writeFastVLine тоже в итоге приводятся к writePixel?
 
 Каким-то образом добиваются 60FPS на похожем экране SSD1351 128x128  https://github.com/bountylabs/blocks-with-screens
 
@@ -20,7 +32,7 @@
 
 
 
-Устарело, см. мейкфайл
+Устарело, см. мейкфайл, переписал rgb565_converter.py
 -------conver assets to .h files----------
 img2h (javasript version): https://github.com/javl/image2cpp/blob/master/index.html
 img2h (microsoft studio cpp version): https://www.codeproject.com/Articles/5336116/Img2Cpp-Create-Cplusplus-Headers-for-Embedding-Ima

@@ -63,7 +63,6 @@ void draw_asset(const asset_t *asset, uint8_t x, uint8_t y) {
   uint8_t h = pgm_read_byte(&asset->height);
 	uint8_t w = pgm_read_byte(&asset->width);
 	framebuffer.drawRGBBitmap(x, y, asset->image, w, h);
-	framebuffer.display();
 }
 
 
@@ -181,7 +180,6 @@ void make_graph(uint16_t *adc_values_array, uint16_t adc_values_max) {
 	}
 
 	for (uint8_t current_colon = GRAPH_X; current_colon < GRAPH_WIDTH; current_colon++) {
-		framebuffer.drawLine(current_colon, GRAPH_Y, current_colon, ST7735_TFT_HEIGHT, ST7735_TFT_BLACK); //old graph colon-by-colon clearing
 		if (current_colon == 0) {
 			framebuffer.drawPixel(current_colon, //The first point is drawn as a pixel because it has no past point
 										ST7735_TFT_HEIGHT-graph_values[current_colon],
@@ -194,7 +192,6 @@ void make_graph(uint16_t *adc_values_array, uint16_t adc_values_max) {
 										ST7735_TFT_HEIGHT-graph_values[current_colon],
 										ST7735_TFT_GREEN);
 		}
-		framebuffer.display();
 	}
 
 
@@ -300,22 +297,38 @@ void measure_flicker() {
 	//Serial.print(", flicker_simple:");
 	//Serial.print(flicker_simple);
 
-	//framebuffer.fillRoundRect(0, 0, 128, 110, 0, ST7735_TFT_BLACK);
-	framebuffer.setCursor(0, 0);
-	framebuffer.setTextColor(ST7735_TFT_GREEN, ST7735_TFT_BLACK); //The first argument is the font color, the second is the background color.
+	framebuffer.fillRoundRect(0, 0, 128, 160, 0, ST7735_TFT_BLACK);
+
+	if (flicker_simple > 0 && flicker_simple <= 5) {
+		draw_asset(&flicker_msg_good_lamp, 0, 0);
+	}
+	else if (flicker_simple > 6 && flicker_simple <= 30) {
+		draw_asset(&flicker_msg_normal_lamp, 0, 0);
+	}
+	else if (flicker_simple > 31) {
+		draw_asset(&flicker_msg_bad_lamp, 0, 0);
+	}
+	else {
+		Serial.println((String)"Flicker simple:"+flicker_simple);
+	}
+
+
+	framebuffer.setCursor(0, 39);
+	framebuffer.setTextColor(ST7735_TFT_GREEN);
 	framebuffer.setTextSize(1);
 	framebuffer.println((String)"Flicker GOST:"+flicker_gost);
 	framebuffer.println((String)"Flicker simple:"+flicker_simple);
 	framebuffer.println((String)"Correction:"+GLOBAL_adc_correction);
-	framebuffer.println((String)"Average:"+adc_values_avg);
-	framebuffer.println((String)"Max:"+adc_values_max);
-	framebuffer.println((String)"Min:"+adc_values_min);
+	//framebuffer.println((String)"Average:"+adc_values_avg);
+	//framebuffer.println((String)"Max:"+adc_values_max);
+	//framebuffer.println((String)"Min:"+adc_values_min);
 	//framebuffer.println((String)"Tm:"+((float)catch_time_us/1000)+"ms");
 	framebuffer.println((String)"Freq:"+freq+" Hz");
 	//framebuffer.println((String)"Light:"+LightSensor.GetLightIntensity()+" lx");
-	framebuffer.display();
 
 	make_graph(adc_values, adc_values_max);
+
+	framebuffer.display();
 }
 
 
@@ -356,17 +369,18 @@ void myClicks() {
 
 
 void show_startup_screen_and_get_correction() {
-  framebuffer.fillRoundRect(0, 0, ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT, 0, ST7735_TFT_BLACK);
 	framebuffer.setCursor(0, 0);
 	framebuffer.setTextColor(ST7735_TFT_GREEN, ST7735_TFT_BLACK);
 	framebuffer.setTextSize(1);
 	framebuffer.println((String)"NPLM v0.0.1");
-	framebuffer.println((String)"Calibration... ");
-	framebuffer.display();
-	GLOBAL_adc_correction = get_adc_correction_value(2000);
-	framebuffer.println((String)"Correction: "+GLOBAL_adc_correction);
-	framebuffer.fillRoundRect(0, 0, ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT, 0, ST7735_TFT_BLACK);
-	framebuffer.display();
+	//framebuffer.println((String)"Calibration... ");
+	//Serial.print("\n\nNPLM-1 Calibration..");
+	//framebuffer.display();
+	//GLOBAL_adc_correction = get_adc_correction_value(2000);
+	//framebuffer.println((String)"Correction: "+GLOBAL_adc_correction);
+	//framebuffer.display();
+	//Serial.print(GLOBAL_adc_correction);
+	//Serial.print(", OK.\n");
 	delay(1000);
 }
 
@@ -387,21 +401,21 @@ void setup(void) {
 	//btn.attach(CLICKS_HANDLER, myClicks);
   //btn.attachClicks(5, fiveClicks);
 
-  Serial.begin(115200);
-  Serial.print("NPLM-1");
-
   LightSensor.begin();
 
   framebuffer.initR(INITR_BLACKTAB);
 	framebuffer.fillScreen(ST77XX_BLACK);
 	framebuffer.display();
-	//draw_asset(&flicker_msg_good_lamp, 0, 0);
+	//
+
+	Serial.begin(115200);
+  Serial.print("\n\nNPLM-1 Start..");
 
 
-	//show_startup_screen_and_get_correction();
+	show_startup_screen_and_get_correction();
 
 	//ts.add(0, 200, [&](void *) { measure_light(); }, nullptr, true);
-	//ts.add(1, 100, [&](void *) { measure_flicker(); }, nullptr, true);
+	ts.add(1, 100, [&](void *) { measure_flicker(); }, nullptr, true);
 
 
 }
