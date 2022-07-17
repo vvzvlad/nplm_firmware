@@ -299,13 +299,13 @@ void measure_flicker() {
 
 	framebuffer.fillRoundRect(0, 0, 128, 160, 0, ST7735_TFT_BLACK);
 
-	if (flicker_simple > 0 && flicker_simple <= 5) {
+	if (flicker_simple >= 0 && flicker_simple <= 5) {
 		draw_asset(&flicker_msg_good_lamp, 0, 0);
 	}
-	else if (flicker_simple > 6 && flicker_simple <= 30) {
+	else if (flicker_simple > 5 && flicker_simple <= 30) {
 		draw_asset(&flicker_msg_normal_lamp, 0, 0);
 	}
-	else if (flicker_simple > 31) {
+	else if (flicker_simple > 30) {
 		draw_asset(&flicker_msg_bad_lamp, 0, 0);
 	}
 	else {
