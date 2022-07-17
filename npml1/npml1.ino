@@ -44,7 +44,6 @@
 #define GRAPH_HEIGHT_DIVIDER 		20  // 1024(single-count resolution, MAX_ADC_VALUE) ->  50(chart height, GRAPH_HEIGHT)
 #define GRAPH_X 								0
 #define GRAPH_Y 								ST7735_TFT_HEIGHT-GRAPH_HEIGHT
-#define LUMINOFOR_EM_MODE_DEEP 	3
 
 #define CORRECTION_NUM_SAMPLES 	512
 #define MEASURE_NUM_SAMPLES 		512
@@ -56,18 +55,18 @@
 
 typedef Adafruit_ST7735 display_t;
 typedef Adafruit_GFX_Buffer<display_t> GFXBuffer_t;
-GFXBuffer_t framebuffer = GFXBuffer_t(128, 160, display_t(ST7735_TFT_CS, ST7735_TFT_DC, ST7735_TFT_RST));
+GFXBuffer_t framebuffer = GFXBuffer_t(ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT, display_t(ST7735_TFT_CS, ST7735_TFT_DC, ST7735_TFT_RST));
 BH1750FVI LightSensor(BH1750FVI::k_DevModeContLowRes);
 EncButton<EB_CALLBACK, BUTTON_PIN> btn(INPUT);
 TickerScheduler ts(5);
 
-volatile uint16_t GLOBAL_adc_correction = 0;
+volatile uint16_t G_adc_correction = 0;
 
-volatile uint8_t GLOBAL_flicker_gost_uint = 0;
-volatile uint8_t GLOBAL_flicker_simple_uint = 0;
-volatile uint16_t GLOBAL_freq = 0;
-volatile uint16_t GLOBAL_adc_values_max = 1;
-volatile uint8_t GLOBAL_graph_values[LUMINOFOR_EM_MODE_DEEP][GRAPH_WIDTH] = {};
+volatile uint8_t G_flicker_gost = 0;
+volatile uint8_t G_flicker_simple = 0;
+volatile uint16_t G_flicker_freq = 0;
+volatile uint16_t G_adc_values_max = 1;
+volatile uint8_t G_graph_values[GRAPH_WIDTH] = {};
 
 volatile uint16_t GLOBAL_lum = 0;
 
@@ -99,11 +98,11 @@ uint16_t get_adc_correction_value(uint16_t correction_catch_time_ms) {
 
 
 void render_flicker_screen() {
-	//uint16_t GLOBAL_freq = freq;
-	//uint16_t GLOBAL_adc_values_max = adc_values_max;
+	//uint16_t G_flicker_freq = freq;
+	//uint16_t G_adc_values_max = adc_values_max;
 
-	framebuffer.fillRoundRect(0, 0, 128, 160-GRAPH_HEIGHT, 0, ST7735_TFT_BLACK); //Очистка только избражения над графиком!
-	uint8_t flicker = GLOBAL_flicker_simple_uint; //or GLOBAL_flicker_gost_uint
+	framebuffer.fillRoundRect(0, 0, ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT-GRAPH_HEIGHT, 0, ST7735_TFT_BLACK); //Clearing only the image above the graph!
+	uint8_t flicker = G_flicker_simple; //or G_flicker_gost
 
 	if (flicker >= 0 && flicker <= 5) {
 		draw_asset(&flicker_msg_good_lamp, 0, 0);
@@ -121,52 +120,100 @@ void render_flicker_screen() {
 	draw_asset(&arrow, 10, 56);
 	draw_asset(&flicker_text_flicker_level, 0, 61);
 
+
+
+
 	framebuffer.setFont(&verdana_bold12pt7b);
-	framebuffer.setCursor(30, 100);
-	framebuffer.setTextSize(1);
-	framebuffer.println((String)flicker+"%");
+	framebuffer.setTextSize(0);
+
+	int16_t x, y;
+	x = 10;
+	y = 100;
+
+
+
+
+	//String flicker_percents = (String)flicker+"%";
+	String flicker_percents = "100%";
+	int16_t x1, y1;
+	uint16_t w, h;
+
+	framebuffer.getTextBounds(flicker_percents, x, y, &x1, &y1, &w, &h);
+	framebuffer.drawRect(x1, y1, w, h, ST7735_TFT_BLUE);
+
+	x = (ST7735_TFT_WIDTH-w)/2;
+
+	//framebuffer.drawRect(x1, y1, w, h, ST7735_TFT_WHITE);
+	framebuffer.setCursor(x, y);
+  framebuffer.print(flicker_percents);
+
+	framebuffer.drawRect(x, y, 1, 1, ST7735_TFT_GREEN);
+
+
+
+
+
 	framebuffer.setFont();
 
 
-	framebuffer.setCursor(0, 150);
+
+
+
+
+
+	//------Graph render------
+
+	//Normal cleaning of the graph part
+	//framebuffer.fillRoundRect(GRAPH_X, GRAPH_Y, GRAPH_WIDTH, GRAPH_Y+GRAPH_HEIGHT, 0, ST7735_TFT_BLACK);
+
+	//Phosphor emulation - old lines gradually fade and go out finally after a several frames
+	for (uint8_t y=GRAPH_Y; y<GRAPH_Y+GRAPH_HEIGHT; y++) {
+    for (uint8_t x=GRAPH_X; x<GRAPH_WIDTH; x++) {
+			uint16_t current_pixel = framebuffer.getPixel(x, y);
+			float divider = 0.6;
+			uint8_t r = ((((current_pixel >> 11) & 0x1F) * 527) + 23) >> 6;
+			uint8_t g = ((((current_pixel >> 5) & 0x3F) * 259) + 33) >> 6;
+			uint8_t b = (((current_pixel & 0x1F) * 527) + 23) >> 6;
+			r = r * divider;
+			g = g * divider;
+			b = b * divider;
+			current_pixel = framebuffer.color565(r, g, b);
+      framebuffer.drawPixel(x, y, current_pixel);
+    }
+  }
+
+	for (uint8_t current_colon = GRAPH_X; current_colon < GRAPH_WIDTH; current_colon++) {
+		if (current_colon == 0) {
+			framebuffer.drawPixel(current_colon, //The first point is drawn as a pixel because it has no past point
+										ST7735_TFT_HEIGHT-G_graph_values[current_colon],
+										ST7735_TFT_GREEN);
+		}
+		else {
+			framebuffer.drawLine(current_colon-1,  //The following points are drawn as lines to prevent gaps between individual points on steep hillsides
+										ST7735_TFT_HEIGHT-G_graph_values[current_colon-1],
+										current_colon,
+										ST7735_TFT_HEIGHT-G_graph_values[current_colon],
+										ST7735_TFT_GREEN);
+		}
+	}
+
+
+	//------Надписи поверх графика ------
 	framebuffer.setTextColor(ST7735_TFT_WHITE);
 	framebuffer.setTextSize(1);
+	framebuffer.setCursor(90, 152);
 	//framebuffer.println((String)"Flicker simple:"+flicker_simple_uint);
-	//framebuffer.println((String)"Correction:"+GLOBAL_adc_correction);
+	//framebuffer.println((String)"Correction:"+G_adc_correction);
 	//framebuffer.println((String)"Average:"+adc_values_avg);
 	//framebuffer.println((String)"Max:"+adc_values_max);
 	//framebuffer.println((String)"Min:"+adc_values_min);
 	//framebuffer.println((String)"Tm:	"+((float)catch_time_us/1000)+"ms");
-	framebuffer.println((String)"Freq:"+GLOBAL_freq+" Hz");
+	framebuffer.print((String)+G_flicker_freq+" Hz");
 	//framebuffer.println((String)"Light:"+LightSensor.GetLightIntensity()+" lx");
 
 
 
-
-	//Graph render
-
-	for (uint8_t row=GRAPH_Y; row<GRAPH_Y+GRAPH_HEIGHT; row++) {
-    for (uint8_t col=GRAPH_X; col<GRAPH_WIDTH; col++) {
-      framebuffer.drawPixel(col, row, ST7735_TFT_GREEN);
-    }
-  }
-	//uint16_t current_pixel = framebuffer.getPixel(100, 100);
-//
-	//for (uint8_t current_colon = GRAPH_X; current_colon < GRAPH_WIDTH; current_colon++) {
-	//	if (current_colon == 0) {
-	//		framebuffer.drawPixel(current_colon, //The first point is drawn as a pixel because it has no past point
-	//									ST7735_TFT_HEIGHT-GLOBAL_graph_values[0][current_colon],
-	//									ST7735_TFT_GREEN);
-	//	}
-	//	else {
-	//		framebuffer.drawLine(current_colon-1,  //The following points are drawn as lines to prevent gaps between individual points on steep hillsides
-	//									ST7735_TFT_HEIGHT-GLOBAL_graph_values[0][current_colon-1],
-	//									current_colon,
-	//									ST7735_TFT_HEIGHT-GLOBAL_graph_values[0][current_colon],
-	//									ST7735_TFT_GREEN);
-	//	}
-	//}
-
+	//------Transfer image------
 	framebuffer.display();
 }
 
@@ -308,8 +355,8 @@ void measure_flicker() {
 
 	//Applying Correction
 	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-		if (adc_values[i] <= GLOBAL_adc_correction) { adc_values[i] = 0;  }
-		else { adc_values[i] = adc_values[i] - GLOBAL_adc_correction; }
+		if (adc_values[i] <= G_adc_correction) { adc_values[i] = 0;  }
+		else { adc_values[i] = adc_values[i] - G_adc_correction; }
 	}
 
 	//Calculating the maximum, minimum, average, average between the maximum and minimum values (for frequency measure)
@@ -334,10 +381,10 @@ void measure_flicker() {
 	//Flicker frequency calculation
 	uint16_t freq = calc_frequency(adc_values, adc_values_min_max_mean, catch_time_us);
 
-	GLOBAL_flicker_gost_uint = flicker_gost_uint;
-	GLOBAL_flicker_simple_uint = flicker_simple_uint;
-	GLOBAL_freq = freq;
-	GLOBAL_adc_values_max = adc_values_max;
+	G_flicker_gost = flicker_gost_uint;
+	G_flicker_simple = flicker_simple_uint;
+	G_flicker_freq = freq;
+	G_adc_values_max = adc_values_max;
 
 
 	//Graph data
@@ -348,12 +395,12 @@ void measure_flicker() {
 	adc_values_multiplier = MAX_ADC_VALUE/adc_values_max;
 
 	for (uint16_t i=0; i < GRAPH_WIDTH; i++) {
-		GLOBAL_graph_values[0][i] = (adc_values[i*GRAPH_WIDTH_DIVIDER+0]*adc_values_multiplier+  //Take 4 values (=GRAPH_WIDTH_DIVIDER)
+		G_graph_values[i] = (adc_values[i*GRAPH_WIDTH_DIVIDER+0]*adc_values_multiplier+  //Take 4 values (=GRAPH_WIDTH_DIVIDER)
 																	adc_values[i*GRAPH_WIDTH_DIVIDER+1]*adc_values_multiplier+ //from the adc values array at a time
 																	adc_values[i*GRAPH_WIDTH_DIVIDER+2]*adc_values_multiplier+ //and collapse them into one
 																	adc_values[i*GRAPH_WIDTH_DIVIDER+3]*adc_values_multiplier)
 																	/GRAPH_WIDTH_DIVIDER/GRAPH_HEIGHT_DIVIDER;
-		if (GLOBAL_graph_values[0][i] > 50) { GLOBAL_graph_values[0][i] = 50; }
+		if (G_graph_values[i] > 50) { G_graph_values[i] = 50; }
 	}
 
 
@@ -365,7 +412,7 @@ void measure_flicker() {
 	//Serial.print(", min:");
 	//Serial.print(adc_values_min);
 	//Serial.print(", correction:");
-	//Serial.print(GLOBAL_adc_correction);
+	//Serial.print(G_adc_correction);
 	//Serial.print(", flicker_gost:");
 	//Serial.print(flicker_gost);
 	//Serial.print(", flicker_simple:");
@@ -421,10 +468,10 @@ void show_startup_screen_and_get_correction() {
 	//framebuffer.println((String)"Calibration... ");
 	//Serial.print("\n\nNPLM-1 Calibration..");
 	//framebuffer.display();
-	//GLOBAL_adc_correction = get_adc_correction_value(2000);
-	//framebuffer.println((String)"Correction: "+GLOBAL_adc_correction);
+	//G_adc_correction = get_adc_correction_value(2000);
+	//framebuffer.println((String)"Correction: "+G_adc_correction);
 	//framebuffer.display();
-	//Serial.print(GLOBAL_adc_correction);
+	//Serial.print(G_adc_correction);
 	//Serial.print(", OK.\n");
 	delay(2000);
 	framebuffer.fillScreen(ST7735_TFT_BLACK);
@@ -459,12 +506,12 @@ void setup(void) {
   Serial.print("\n\nNPLM-1 Start..");
 
 
-	show_startup_screen_and_get_correction();
+	//show_startup_screen_and_get_correction();
 
 	ts.add(0, 200, [&](void *) { measure_light(); }, nullptr, true);
 
-	ts.add(1, 100, [&](void *) { measure_flicker(); }, nullptr, true);
-	ts.add(2, 100, [&](void *) { render_flicker_screen(); }, nullptr, true);
+	ts.add(1, 200, [&](void *) { measure_flicker(); }, nullptr, true);
+	ts.add(2, 200, [&](void *) { render_flicker_screen(); }, nullptr, true);
 
 
 	ts.add(3, 5000, [&](void *) { free_mem_print(); }, nullptr, true);
