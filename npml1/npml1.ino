@@ -1,16 +1,15 @@
 #include <ESP8266WiFi.h>
 
+#include <Adafruit_GFX.h>    				// Core graphics library
+#include <Adafruit_ST7735.h> 				// Hardware-specific library for ST7735
+#include <Adafruit_GFX_Buffer.h>		// Framebuffer library to speed up rendering
 
-#include <Adafruit_GFX.h>    // Core graphics library
-#include <Adafruit_ST7735.h> // Hardware-specific library for ST7735
 #include <SPI.h>
 
 #include <BH1750FVI.h>
 
 #include <TickerScheduler.h>
 #include <EncButton.h>
-//#include <framebuffer.h>
-
 #include <images.h>
 
 //Debug: Serial.println(__LINE__);
@@ -50,61 +49,12 @@
 
 #define MAX_FREQ 								300
 
-class  aFrameBuffer : public Adafruit_GFX {
-  public:
-    uint16_t *buffer;
-		int16_t fb_width;
-		int16_t fb_height;
-		uint8_t tft_spi_dc;
-		uint8_t tft_spi_cs;
-		Adafruit_ST7735 *display_tft;
-
-    aFrameBuffer(int16_t w, int16_t h, Adafruit_ST7735 *tft, uint8_t spi_dc, uint8_t spi_cs): Adafruit_GFX(w, h)
-    {
-			int16_t fb_width = w;
-			int16_t fb_height = h;
-			uint8_t tft_spi_dc = spi_dc;
-			uint8_t tft_spi_cs = spi_cs;
-			display_tft = tft;
-      buffer = (uint16_t*)malloc(2 * h * fb_width);
-      for (int i = 0; i < fb_height * fb_width; i++)
-        buffer[i] = 0;
-    }
-		void init()
-    {
-      display_tft->initR(INITR_BLACKTAB);
-      display_tft->fillScreen(ST7735_TFT_BLACK);
-    }
-    void drawPixel( int16_t x, int16_t y, uint16_t color)
-    {
-      if (x > fb_width-1) return;
-      if (x < 0) return;
-      if (y > fb_height-1) return;
-      if (y < 0) return;
-      buffer[x + y * _width] = color;
-    }
-
-    void display()
-    {
-      display_tft->setAddrWindow(0, 0, fb_height, fb_height);
-      digitalWrite(tft_spi_dc, HIGH);
-      digitalWrite(tft_spi_cs, LOW);
-      SPI.beginTransaction(SPISettings(80000000, MSBFIRST, SPI_MODE0));
-      for (uint16_t i = 0; i < fb_height * fb_height; i++)
-      {
-        SPI.write16(buffer[i]);
-      }
-      SPI.endTransaction();
-      digitalWrite(tft_spi_cs, HIGH);
-    }
-};
-
-Adafruit_ST7735 tft = Adafruit_ST7735(ST7735_TFT_CS, ST7735_TFT_DC, ST7735_TFT_RST);
+typedef Adafruit_ST7735 display_t;
+typedef Adafruit_GFX_Buffer<display_t> GFXBuffer_t;
+GFXBuffer_t tft = GFXBuffer_t(128, 160, display_t(ST7735_TFT_CS, ST7735_TFT_DC, ST7735_TFT_RST));
 BH1750FVI LightSensor(BH1750FVI::k_DevModeContLowRes);
 EncButton<EB_CALLBACK, BUTTON_PIN> btn(INPUT);
-aFrameBuffer frame(ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT, &tft, ST7735_TFT_CS, ST7735_TFT_DC);
 TickerScheduler ts(5);
-
 
 uint16_t GLOBAL_adc_correction = 0;
 
@@ -112,8 +62,8 @@ uint16_t GLOBAL_adc_correction = 0;
 void draw_asset(const asset_t *asset, uint8_t x, uint8_t y) {
   uint8_t h = pgm_read_byte(&asset->height);
 	uint8_t w = pgm_read_byte(&asset->width);
-	frame.drawRGBBitmap(x, y, asset->image, w, h);
-	frame.display();
+	tft.drawRGBBitmap(x, y, asset->image, w, h);
+	tft.display();
 }
 
 
@@ -380,7 +330,7 @@ void isr() {
 
 void button_click_handler() {
   Serial.print("Click\n");
-	draw_asset(&flicker_msg_good_lamp, 0, 15);
+	draw_asset(&flicker_msg_good_lamp, 0, 0);
 	//measure_flicker();
 }
 
@@ -433,12 +383,10 @@ void setup(void) {
 
   LightSensor.begin();
 
-  //tft.initR(INITR_BLACKTAB);
-  //tft.fillScreen(ST77XX_BLACK);
-
-	frame.init();
-	draw_asset(&flicker_msg_good_lamp, 0, 15);
-	frame.display();
+  tft.initR(INITR_BLACKTAB);
+	tft.fillScreen(ST77XX_BLACK);
+	tft.display();
+	//draw_asset(&flicker_msg_good_lamp, 0, 0);
 
 
 	//show_startup_screen_and_get_correction();
