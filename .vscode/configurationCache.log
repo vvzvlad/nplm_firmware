@@ -1,0 +1,1 @@
+{"buildTargets":["assets_convert","build","clean","exeption_decode","git_commit","install_env","main","make","miniterm","upload","upload_fast"],"launchTargets":[],"customConfigurationProvider":{"workspaceBrowse":{"browsePath":[],"compilerArgs":[]},"fileIndex":[]}}
