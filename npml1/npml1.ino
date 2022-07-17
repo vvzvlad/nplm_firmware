@@ -98,56 +98,57 @@ uint16_t get_adc_correction_value(uint16_t correction_catch_time_ms) {
 
 
 void render_flicker_screen() {
-	//uint16_t G_flicker_freq = freq;
 	//uint16_t G_adc_values_max = adc_values_max;
 
 	framebuffer.fillRoundRect(0, 0, ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT-GRAPH_HEIGHT, 0, ST7735_TFT_BLACK); //Clearing only the image above the graph!
 	uint8_t flicker = G_flicker_simple; //or G_flicker_gost
+	uint16_t freq = G_flicker_freq;
 
-	if (flicker >= 0 && flicker <= 5) {
-		draw_asset(&flicker_msg_good_lamp, 0, 0);
-	}
-	else if (flicker > 5 && flicker <= 30) {
-		draw_asset(&flicker_msg_normal_lamp, 0, 0);
-	}
-	else if (flicker > 30) {
-		draw_asset(&flicker_msg_bad_lamp, 0, 0);
-	}
-	else {
-		Serial.println((String)"Flicker simple:"+flicker);
-	}
-	draw_asset(&flicker_rainbow, 0, 39);
-	draw_asset(&arrow, 10, 56);
-	draw_asset(&flicker_text_flicker_level, 0, 61);
+	//------ Calc combined score ------//
+	uint8_t ff_combined = 666; //FF = Flicker + Freq, combined for total lamp score, abstract percent
+
+	if (freq >= 0 && freq <= 250) 									ff_combined = flicker;
+	else if (freq > 250 && freq <= 300) 						ff_combined = flicker*(float)(((50-(freq-250)))/50);
+	else if (freq > 300) 														ff_combined = 0;
+	else 																						ff_combined = 666;
+
+	if (ff_combined >= 0 && ff_combined <= 5) 			draw_asset(&flicker_msg_good_lamp, 0, 0);
+	else if (ff_combined > 5 && ff_combined <= 30) 	draw_asset(&flicker_msg_normal_lamp, 0, 0);
+	else if (ff_combined > 30) 											draw_asset(&flicker_msg_bad_lamp, 0, 0);
+	else  																					Serial.println((String)"FF score:"+ff_combined);
 
 
+	draw_asset(&flicker_rainbow, 0, 39); //Rainbow
+
+	uint8_t arrow_diff = (uint8_t)(1.28*(float)ff_combined);
+	draw_asset(&arrow, arrow_diff, 56); //Arrow on the rainbow
+
+	draw_asset(&flicker_text_flicker_level, 0, 61); //Text "уровень пульсаций"
 
 
+
+	//------ Draw percent text ------//
 	framebuffer.setFont(&verdana_bold12pt7b);
 	framebuffer.setTextSize(0);
+	String flicker_percents = (String)flicker+"%";
 
-	int16_t x, y;
-	x = 10;
-	y = 100;
+	int8_t cursor_x = 0, cursor_y = 100;
+	int16_t text_start_x, text_start_y; //not used
+	uint16_t text_width, text_height;
 
+	framebuffer.getTextBounds(flicker_percents,
+														cursor_x,
+														cursor_y,
+														&text_start_x,
+														&text_start_y,
+														&text_width,
+														&text_height);
+	//framebuffer.drawRect(text_start_x, text_start_y, text_width, text_height, ST7735_TFT_BLUE); //debug rect
 
-
-
-	//String flicker_percents = (String)flicker+"%";
-	String flicker_percents = "100%";
-	int16_t x1, y1;
-	uint16_t w, h;
-
-	framebuffer.getTextBounds(flicker_percents, x, y, &x1, &y1, &w, &h);
-	framebuffer.drawRect(x1, y1, w, h, ST7735_TFT_BLUE);
-
-	x = (ST7735_TFT_WIDTH-w)/2;
-
-	//framebuffer.drawRect(x1, y1, w, h, ST7735_TFT_WHITE);
-	framebuffer.setCursor(x, y);
+	cursor_x = (ST7735_TFT_WIDTH-text_width)/2;
+	framebuffer.setCursor(cursor_x, cursor_y);
   framebuffer.print(flicker_percents);
 
-	framebuffer.drawRect(x, y, 1, 1, ST7735_TFT_GREEN);
 
 
 
@@ -161,7 +162,7 @@ void render_flicker_screen() {
 
 
 
-	//------Graph render------
+	//------ Graph render ------//
 
 	//Normal cleaning of the graph part
 	//framebuffer.fillRoundRect(GRAPH_X, GRAPH_Y, GRAPH_WIDTH, GRAPH_Y+GRAPH_HEIGHT, 0, ST7735_TFT_BLACK);
@@ -198,7 +199,7 @@ void render_flicker_screen() {
 	}
 
 
-	//------Надписи поверх графика ------
+	//------ Text on top of the graphic ------//
 	framebuffer.setTextColor(ST7735_TFT_WHITE);
 	framebuffer.setTextSize(1);
 	framebuffer.setCursor(90, 152);
