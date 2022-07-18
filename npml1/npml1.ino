@@ -58,12 +58,14 @@
 
 #define TS_MEASURE_LIGHT				0
 #define TS_MEASURE_FLICKER			1
-#define TS_RENDER_FLICKER_SCR		2
-#define TS_RENDER_LIGHT_SCR			3
+#define TS_RENDER_FLICKER		2
+#define TS_RENDER_LIGHT			3
 #define TS_RESERVED							4
 #define TS_DEBUG								5
+#define TS_RENDER_BOOT					6
+#define TS_RENDER_SHUTDOWN			7
 
-#define TS_MAX_THREAD						6
+#define TS_MAX_THREAD						8
 
 
 typedef Adafruit_ST7735 display_t;
@@ -89,10 +91,11 @@ enum APPS {
 	FLICKER,
 	LIGHT,
 	HELP,
-	EXIT
+	SHUTDOWN,
+	UNKNOWN
 };
 
-volatile uint16_t G_app_runned = BOOT;
+volatile uint16_t G_app_runned = UNKNOWN;
 
 void draw_asset(const asset_t *asset, uint8_t x, uint8_t y) {
   uint8_t h = pgm_read_byte(&asset->height);
@@ -141,7 +144,7 @@ void render_light_screen() {
 
 
 	//------ Draw lux text ------//
-	framebuffer.setFont(&verdana_bold12pt7b);
+	framebuffer.setFont(&verdana_bold12pt7b); //LARGE text font
 	framebuffer.setTextSize(0);
 	String lux_value;
 	if (lum < 1000) lux_value = (String)lum+" lux";
@@ -164,7 +167,7 @@ void render_light_screen() {
 	cursor_x = (ST7735_TFT_WIDTH-text_width)/2;
 	framebuffer.setCursor(cursor_x, cursor_y);
 	framebuffer.print(lux_value);
-	framebuffer.setFont();
+	framebuffer.setFont(); //Reset LARGE text font to the default
 
 	framebuffer.display();
 }
@@ -211,7 +214,7 @@ void render_flicker_screen() {
 
 
 	//------ Draw percent text ------//
-	framebuffer.setFont(&verdana_bold12pt7b);
+	framebuffer.setFont(&verdana_bold12pt7b); //LARGE text font
 	framebuffer.setTextSize(0);
 	String flicker_percents = (String)flicker+"%";
 
@@ -238,7 +241,7 @@ void render_flicker_screen() {
 		draw_asset(&flicker_text_no_data_big, 0, 80); //Text "Н/Д"
 	}
 
-	framebuffer.setFont();
+	framebuffer.setFont(); //Reset LARGE text font to the default
 
 
 
@@ -257,23 +260,23 @@ void render_flicker_screen() {
 	}
 
 	//Normal cleaning of the graph part
-	//framebuffer.fillRoundRect(GRAPH_X, GRAPH_Y, GRAPH_WIDTH, GRAPH_Y+GRAPH_HEIGHT, 0, ST7735_TFT_BLACK);
+	framebuffer.fillRoundRect(GRAPH_X, GRAPH_Y, GRAPH_WIDTH, GRAPH_Y+GRAPH_HEIGHT, 0, ST7735_TFT_BLACK);
 
 	//Phosphor emulation - old lines gradually fade and go out finally after a several frames
-	for (uint8_t y=GRAPH_Y; y<GRAPH_Y+GRAPH_HEIGHT; y++) {
-    for (uint8_t x=GRAPH_X; x<GRAPH_WIDTH; x++) {
-			uint16_t current_pixel = framebuffer.getPixel(x, y);
-			float divider = 0.6;
-			uint8_t r = ((((current_pixel >> 11) & 0x1F) * 527) + 23) >> 6;
-			uint8_t g = ((((current_pixel >> 5) & 0x3F) * 259) + 33) >> 6;
-			uint8_t b = (((current_pixel & 0x1F) * 527) + 23) >> 6;
-			r = r * divider;
-			g = g * divider;
-			b = b * divider;
-			current_pixel = framebuffer.color565(r, g, b);
-      framebuffer.drawPixel(x, y, current_pixel);
-    }
-  }
+	//for (uint8_t y=GRAPH_Y; y<GRAPH_Y+GRAPH_HEIGHT; y++) {
+  //  for (uint8_t x=GRAPH_X; x<GRAPH_WIDTH; x++) {
+	//		uint16_t current_pixel = framebuffer.getPixel(x, y);
+	//		float divider = 0.6;
+	//		uint8_t r = ((((current_pixel >> 11) & 0x1F) * 527) + 23) >> 6;
+	//		uint8_t g = ((((current_pixel >> 5) & 0x3F) * 259) + 33) >> 6;
+	//		uint8_t b = (((current_pixel & 0x1F) * 527) + 23) >> 6;
+	//		r = r * divider;
+	//		g = g * divider;
+	//		b = b * divider;
+	//		current_pixel = framebuffer.color565(r, g, b);
+  //    framebuffer.drawPixel(x, y, current_pixel);
+  //  }
+  //}
 
 	for (uint8_t current_colon = GRAPH_X; current_colon < GRAPH_WIDTH; current_colon++) {
 		if (current_colon == 0) {
@@ -525,60 +528,70 @@ void measure_light() {
 	//framebuffer.display();
 }
 
-void isr() {
-  btn.tickISR();
+
+void change_app(APPS target_app){
+	if (G_app_runned == target_app) {return;}
+	G_app_runned = target_app;
+	ts.disableAll();
+	ts.enable(TS_DEBUG);
+
+	if (target_app == FLICKER) {
+		ts.enable(TS_MEASURE_FLICKER);
+		ts.enable(TS_RENDER_FLICKER);
+		framebuffer.fillScreen(ST7735_TFT_BLACK);
+		return;
+	}
+
+	if (target_app == LIGHT) {
+		ts.enable(TS_MEASURE_LIGHT);
+		ts.enable(TS_RENDER_LIGHT);
+		framebuffer.fillScreen(ST7735_TFT_BLACK);
+		return;
+	}
+
+	if (target_app == BOOT) {
+		ts.enable(TS_RENDER_BOOT);
+		framebuffer.fillScreen(ST7735_TFT_BLACK);
+		return;
+	}
+
+	if (target_app == SHUTDOWN) {
+		ts.enable(TS_RENDER_SHUTDOWN);
+		//No clear screen — this applicationdraws the interface
+		//on top of the old canvas, it is a popup window
+		return;
+	}
 }
 
-void button_click_handler() {
+void button_click_handler() { //Switch applications cyclically at the touch of a button
 	Serial.print("Click\n");
 
-	if (G_app_runned == FLICKER){
-		ts.disableAll();
-		ts.enable(TS_MEASURE_LIGHT);
-		ts.enable(TS_RENDER_LIGHT_SCR);
-		G_app_runned = LIGHT;
-		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		return;
-	}
-
-	if (G_app_runned == LIGHT){
-		ts.disableAll();
-		ts.enable(TS_MEASURE_FLICKER);
-		ts.enable(TS_RENDER_FLICKER_SCR);
-		G_app_runned = FLICKER;
-		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		return;
-	}
-
-
-}
-
-void free_mem_print() {
-	Serial.print("\nFree memory: ");
-  Serial.print(system_get_free_heap_size());
-	Serial.print("\n");
+	if 			(G_app_runned == FLICKER) 		change_app(LIGHT);
+	else if (G_app_runned == LIGHT) 			change_app(FLICKER);
+	else if (G_app_runned == SHUTDOWN) 		change_app(BOOT); 		//Simulate rebooting
+	else 																	change_app(SHUTDOWN); //strange behavior, fall down paws upwards
 }
 
 void button_holded_handler() {
   Serial.print("Holded\n");
+
 }
 
-void button_hold_handler() {
+void button_hold_handler() { //A long press to turn it off
   Serial.print("Hold\n");
+	change_app(SHUTDOWN);
 }
 
-void myClicks() {
-  Serial.print("CLICKS_HANDLER: ");
-  Serial.println(btn.clicks);
-}
 
-void show_startup_screen_and_get_correction() {
+void boot_screen_render() {
 	draw_asset(&boot_screen, 0, 0);
 	framebuffer.setCursor(34, 97);
 	framebuffer.setTextColor(ST7735_TFT_WHITE);
 	framebuffer.setTextSize(1);
 	framebuffer.println(utf8rus("Загрузка..."));
 	framebuffer.display();
+	framebuffer.fillScreen(ST7735_TFT_BLACK);
+
 	//framebuffer.println((String)"Calibration... ");
 	//Serial.print("\n\nNPLM-1 Calibration..");
 	//framebuffer.display();
@@ -587,12 +600,33 @@ void show_startup_screen_and_get_correction() {
 	//framebuffer.display();
 	//Serial.print(G_adc_correction);
 	//Serial.print(", OK.\n");
+
 	delay(2000);
-	framebuffer.fillScreen(ST7735_TFT_BLACK);
+	change_app(FLICKER);
+}
+
+void shutdown_screen_render() {
+	framebuffer.fillScreen(ST7735_TFT_BLACK); //Temporarily!
+	framebuffer.setCursor(34, 97);
+	framebuffer.setTextColor(ST7735_TFT_WHITE);
+	framebuffer.setTextSize(1);
+	framebuffer.println(utf8rus("Выключение..."));
+	framebuffer.display();
+	ts.disableAll(); //Freeze until reboot
 }
 
 
 
+void free_mem_print() {
+	Serial.print("\nFree memory: ");
+  Serial.print(system_get_free_heap_size());
+	Serial.print("\n");
+}
+
+
+void isr() {
+  btn.tickISR();
+}
 
 void setup(void) {
 	WiFi.persistent(false); //Disable wifi settings recording in flash
@@ -620,22 +654,18 @@ void setup(void) {
   Serial.print("\n\nNPLM-1 Start..");
 
 
-	//show_startup_screen_and_get_correction();
-
 	ts.add(TS_MEASURE_LIGHT, 200, [&](void *) { measure_light(); }, nullptr, false);
 	ts.add(TS_MEASURE_FLICKER, 200, [&](void *) { measure_flicker(); }, nullptr, false);
-	ts.add(TS_RENDER_FLICKER_SCR, 200, [&](void *) { render_flicker_screen(); }, nullptr, false);
-	ts.add(TS_RENDER_LIGHT_SCR, 200, [&](void *) { render_light_screen(); }, nullptr, false);
+	ts.add(TS_RENDER_FLICKER, 200, [&](void *) { render_flicker_screen(); }, nullptr, false);
+	ts.add(TS_RENDER_LIGHT, 200, [&](void *) { render_light_screen(); }, nullptr, false);
 	ts.add(TS_DEBUG, 5000, [&](void *) { free_mem_print(); }, nullptr, false);
+	ts.add(TS_RENDER_BOOT, 200, [&](void *) { boot_screen_render(); }, nullptr, false);
+	ts.add(TS_RENDER_SHUTDOWN, 200, [&](void *) { shutdown_screen_render(); }, nullptr, false);
 	ts.disableAll();
-
 
 	ts.enable(TS_DEBUG);
 
-	ts.enable(TS_MEASURE_FLICKER);
-	ts.enable(TS_RENDER_FLICKER_SCR);
-	G_app_runned = FLICKER;
-
+	change_app(BOOT);
 }
 
 void loop() {
