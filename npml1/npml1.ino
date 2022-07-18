@@ -15,7 +15,7 @@
 #include <images.h>
 
 #include "GyverFilters.h"
-
+#include <ErriezSerialTerminal.h>
 
 
 //Debug: Serial.println(__LINE__);
@@ -85,6 +85,7 @@ GFXBuffer_t framebuffer = GFXBuffer_t(ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT, displ
 BH1750FVI LightSensor(BH1750FVI::k_DevModeContLowRes);
 EncButton<EB_CALLBACK, BUTTON_PIN> btn(INPUT);
 TickerScheduler ts(TS_MAX);
+SerialTerminal term('\n', ' '); //new line character(\n), delimiter character(space)
 
 //Filters
 GMedian<5, uint16_t> flicker_freq_filter;
@@ -640,7 +641,11 @@ void free_mem_calc() {
 }
 
 
-void debug_print() {
+void debug() {
+	//mem_print();
+}
+
+void mem_print() {
 	Serial.print("\nFree memory: ");
   Serial.print(system_get_free_heap_size());
 	Serial.print(", min free memory: ");
@@ -648,6 +653,15 @@ void debug_print() {
 	Serial.print("\n");
 }
 
+void unknown_command(const char *command)
+{
+    Serial.print(F("Unknown command: "));
+    Serial.println(command);
+}
+
+void post_command_handler() {
+  Serial.print(F("> "));
+}
 
 void isr() {
   btn.tickISR();
@@ -677,13 +691,18 @@ void setup(void) {
 
 	Serial.begin(115200);
   Serial.print("\n\nNPLM-1 Start..");
+	term.setSerialEcho(true);
+	term.addCommand("mem", mem_print);
+	term.setPostCommandHandler(post_command_handler);
+	term.setDefaultHandler(unknown_command);
+
 
 
 	ts.add(TS_MEASURE_LIGHT, 			200,  [&](void *) { measure_light(); 				  	}, nullptr, false);
 	ts.add(TS_MEASURE_FLICKER, 		200,  [&](void *) { measure_flicker(); 					}, nullptr, false);
 	ts.add(TS_RENDER_FLICKER, 		200,  [&](void *) { render_flicker_screen();  	}, nullptr, false);
 	ts.add(TS_RENDER_LIGHT, 			200,  [&](void *) { render_light_screen(); 			}, nullptr, false);
-	ts.add(TS_DEBUG, 							5000, [&](void *) { debug_print(); 							}, nullptr, false);
+	ts.add(TS_DEBUG, 							5000, [&](void *) { debug(); 										}, nullptr, false);
 	ts.add(TS_RENDER_BOOT, 				200,  [&](void *) { boot_screen_render(); 			}, nullptr, false);
 	ts.add(TS_RENDER_SHUTDOWN, 		200,  [&](void *) { shutdown_screen_render(); 	}, nullptr, false);
 	ts.disableAll();
@@ -697,6 +716,7 @@ void setup(void) {
 void loop() {
   ts.update();
 	btn.tick();
+	term.readSerial();
 
 	//if (btn.click()) Serial.println("click");
 	//if (btn.held()) Serial.println("held");
