@@ -56,12 +56,22 @@
 
 #define MAX_FREQ 								300
 
+#define TS_MEASURE_LIGHT				0
+#define TS_MEASURE_FLICKER			1
+#define TS_RENDER_FLICKER_SCR		2
+#define TS_RENDER_LIGHT_SCR			3
+#define TS_RESERVED							4
+#define TS_DEBUG								5
+
+#define TS_MAX_THREAD						6
+
+
 typedef Adafruit_ST7735 display_t;
 typedef Adafruit_GFX_Buffer<display_t> GFXBuffer_t;
 GFXBuffer_t framebuffer = GFXBuffer_t(ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT, display_t(ST7735_TFT_CS, ST7735_TFT_DC, ST7735_TFT_RST));
 BH1750FVI LightSensor(BH1750FVI::k_DevModeContLowRes);
 EncButton<EB_CALLBACK, BUTTON_PIN> btn(INPUT);
-TickerScheduler ts(5);
+TickerScheduler ts(TS_MAX_THREAD);
 
 volatile uint16_t G_adc_correction = 0;
 
@@ -72,7 +82,17 @@ volatile uint16_t G_adc_values_max = 1;
 volatile uint16_t G_adc_values_min = MAX_ADC_VALUE;
 volatile uint8_t G_graph_values[GRAPH_WIDTH] = {};
 
-volatile uint16_t GLOBAL_lum = 0;
+volatile uint16_t G_lum = 0;
+
+enum APPS {
+	BOOT,
+	FLICKER,
+	LIGHT,
+	HELP,
+	EXIT
+};
+
+volatile uint16_t G_app_runned = BOOT;
 
 void draw_asset(const asset_t *asset, uint8_t x, uint8_t y) {
   uint8_t h = pgm_read_byte(&asset->height);
@@ -97,6 +117,56 @@ uint16_t get_adc_correction_value(uint16_t correction_catch_time_ms) {
 	//Serial.print("\n\n");
 
 	return correction_value;
+}
+
+
+void render_light_screen() {
+	uint16_t lum = G_lum;
+
+	framebuffer.fillRoundRect(0, 0, ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT-GRAPH_HEIGHT, 0, ST7735_TFT_BLACK); //Clearing only the image above the graph!
+
+
+	//Drawing the labels "good lamp", "bad lamp", "normal lamp"
+	if (lum >= 0 && lum <= 200) 	draw_asset(&flicker_msg_too_low_lum, 0, 0); //TODO временно!
+	else if (lum > 200) 					draw_asset(&light_msg_good, 0, 0);
+
+	draw_asset(&light_rainbow, 0, 39); //Rainbow
+
+	uint8_t arrow_diff = 0;
+	if (lum/8 > ST7735_TFT_WIDTH) arrow_diff = ST7735_TFT_WIDTH-7; //8 — ширина стрелки, для того, чтобы она не уходила за границы экрана
+	else arrow_diff = lum/8;
+	draw_asset(&arrow, arrow_diff, 56); //Arrow on the rainbow
+
+	draw_asset(&light_text_light_level, 0, 61); //Text "уровень освещенности"
+
+
+	//------ Draw lux text ------//
+	framebuffer.setFont(&verdana_bold12pt7b);
+	framebuffer.setTextSize(0);
+	String lux_value;
+	if (lum < 1000) lux_value = (String)lum+" lux";
+	else if (lum >= 1000) lux_value = (String)(lum/1000)+"k lux";
+
+
+	int8_t cursor_x = 0, cursor_y = 100;
+	int16_t text_start_x, text_start_y; //not used
+	uint16_t text_width, text_height;
+
+	framebuffer.getTextBounds(lux_value,  			 //Fucking magic to
+														cursor_x,					 //align text horizontally.
+														cursor_y,
+														&text_start_x,
+														&text_start_y,
+														&text_width,
+														&text_height);
+	//framebuffer.drawRect(text_start_x, text_start_y, text_width, text_height, ST7735_TFT_BLUE); //debug rect
+
+	cursor_x = (ST7735_TFT_WIDTH-text_width)/2;
+	framebuffer.setCursor(cursor_x, cursor_y);
+	framebuffer.print(lux_value);
+	framebuffer.setFont();
+
+	framebuffer.display();
 }
 
 
@@ -127,9 +197,6 @@ void render_flicker_screen() {
 
 	if (adc_min > TOO_LIGHT_ADC_VALUE)							draw_asset(&flicker_msg_too_big_lum, 0, 0);
 	if (adc_max < TOO_DARK_ADC_VALUE)								draw_asset(&flicker_msg_too_low_lum, 0, 0);
-
-
-
 
 
 	draw_asset(&flicker_rainbow, 0, 39); //Rainbow
@@ -168,7 +235,7 @@ void render_flicker_screen() {
 		framebuffer.print(flicker_percents);
 	}
 	else {
-		draw_asset(&flicker_text_no_data_big, 0, 79); //Text "Н/Д"
+		draw_asset(&flicker_text_no_data_big, 0, 80); //Text "Н/Д"
 	}
 
 	framebuffer.setFont();
@@ -449,7 +516,7 @@ void measure_flicker() {
 
 void measure_light() {
   uint16_t lum = LightSensor.GetLightIntensity();
-	GLOBAL_lum = lum;
+	G_lum = lum;
 	//framebuffer.fillScreen(ST7735_TFT_BLACK);
   //framebuffer.setCursor(0, 0);
 	//framebuffer.setTextColor(ST7735_TFT_WHITE);
@@ -463,7 +530,27 @@ void isr() {
 }
 
 void button_click_handler() {
-  Serial.print("Click\n");
+	Serial.print("Click\n");
+
+	if (G_app_runned == FLICKER){
+		ts.disableAll();
+		ts.enable(TS_MEASURE_LIGHT);
+		ts.enable(TS_RENDER_LIGHT_SCR);
+		G_app_runned = LIGHT;
+		framebuffer.fillScreen(ST7735_TFT_BLACK);
+		return;
+	}
+
+	if (G_app_runned == LIGHT){
+		ts.disableAll();
+		ts.enable(TS_MEASURE_FLICKER);
+		ts.enable(TS_RENDER_FLICKER_SCR);
+		G_app_runned = FLICKER;
+		framebuffer.fillScreen(ST7735_TFT_BLACK);
+		return;
+	}
+
+
 }
 
 void free_mem_print() {
@@ -535,14 +622,19 @@ void setup(void) {
 
 	//show_startup_screen_and_get_correction();
 
-	ts.add(0, 200, [&](void *) { measure_light(); }, nullptr, true);
+	ts.add(TS_MEASURE_LIGHT, 200, [&](void *) { measure_light(); }, nullptr, false);
+	ts.add(TS_MEASURE_FLICKER, 200, [&](void *) { measure_flicker(); }, nullptr, false);
+	ts.add(TS_RENDER_FLICKER_SCR, 200, [&](void *) { render_flicker_screen(); }, nullptr, false);
+	ts.add(TS_RENDER_LIGHT_SCR, 200, [&](void *) { render_light_screen(); }, nullptr, false);
+	ts.add(TS_DEBUG, 5000, [&](void *) { free_mem_print(); }, nullptr, false);
+	ts.disableAll();
 
-	ts.add(1, 200, [&](void *) { measure_flicker(); }, nullptr, true);
-	ts.add(2, 200, [&](void *) { render_flicker_screen(); }, nullptr, true);
 
+	ts.enable(TS_DEBUG);
 
-	ts.add(3, 5000, [&](void *) { free_mem_print(); }, nullptr, true);
-
+	ts.enable(TS_MEASURE_FLICKER);
+	ts.enable(TS_RENDER_FLICKER_SCR);
+	G_app_runned = FLICKER;
 
 }
 
