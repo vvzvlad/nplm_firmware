@@ -31,6 +31,7 @@
 #define ST7735_TFT_BLUE 				0x001F
 #define ST7735_TFT_RED 					0xF800
 #define ST7735_TFT_GREEN 				0x07E0
+#define ST7735_TFT_DARK_GREEN 	0x0220
 #define ST7735_TFT_CYAN 				0x07FF
 #define ST7735_TFT_MAGENTA 			0xF81F
 #define ST7735_TFT_YELLOW 			0xFFE0
@@ -50,6 +51,8 @@
 #define SYNC_NUM_SAMPLES 				256
 
 #define MAX_ADC_VALUE 					1024
+#define TOO_LIGHT_ADC_VALUE 		1000
+#define TOO_DARK_ADC_VALUE 		  20
 
 #define MAX_FREQ 								300
 
@@ -66,6 +69,7 @@ volatile uint8_t G_flicker_gost = 0;
 volatile uint8_t G_flicker_simple = 0;
 volatile uint16_t G_flicker_freq = 0;
 volatile uint16_t G_adc_values_max = 1;
+volatile uint16_t G_adc_values_min = MAX_ADC_VALUE;
 volatile uint8_t G_graph_values[GRAPH_WIDTH] = {};
 
 volatile uint16_t GLOBAL_lum = 0;
@@ -98,30 +102,42 @@ uint16_t get_adc_correction_value(uint16_t correction_catch_time_ms) {
 
 
 void render_flicker_screen() {
-	//uint16_t G_adc_values_max = adc_values_max;
-
-	framebuffer.fillRoundRect(0, 0, ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT-GRAPH_HEIGHT, 0, ST7735_TFT_BLACK); //Clearing only the image above the graph!
 	uint8_t flicker = G_flicker_simple; //or G_flicker_gost
 	uint16_t freq = G_flicker_freq;
+	uint16_t adc_max = G_adc_values_max;
+	uint16_t adc_min = G_adc_values_min;
+
+	framebuffer.fillRoundRect(0, 0, ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT-GRAPH_HEIGHT, 0, ST7735_TFT_BLACK); //Clearing only the image above the graph!
 
 	//------ Calc combined score ------//
+
 	uint8_t ff_combined = 666; //FF = Flicker + Freq, combined for total lamp score, abstract percent
 
+	//Flicker with a frequency greater than 300 Hz is considered safe, so it does not count in the rating
 	if (freq >= 0 && freq <= 250) 									ff_combined = flicker;
 	else if (freq > 250 && freq <= 300) 						ff_combined = flicker*(float)(((50-(freq-250)))/50);
-	else if (freq > 300) 														ff_combined = 0;
+	else if (freq > 300) 														ff_combined = 0; //
 	else 																						ff_combined = 666;
 
+	//Drawing the labels "good lamp", "bad lamp", "normal lamp"
 	if (ff_combined >= 0 && ff_combined <= 5) 			draw_asset(&flicker_msg_good_lamp, 0, 0);
 	else if (ff_combined > 5 && ff_combined <= 30) 	draw_asset(&flicker_msg_normal_lamp, 0, 0);
 	else if (ff_combined > 30) 											draw_asset(&flicker_msg_bad_lamp, 0, 0);
 	else  																					Serial.println((String)"FF score:"+ff_combined);
 
+	if (adc_min > TOO_LIGHT_ADC_VALUE)							draw_asset(&flicker_msg_too_big_lum, 0, 0);
+	if (adc_max < TOO_DARK_ADC_VALUE)								draw_asset(&flicker_msg_too_low_lum, 0, 0);
+
+
+
+
 
 	draw_asset(&flicker_rainbow, 0, 39); //Rainbow
 
-	uint8_t arrow_diff = (uint8_t)(1.28*(float)ff_combined);
-	draw_asset(&arrow, arrow_diff, 56); //Arrow on the rainbow
+	if (adc_min < TOO_LIGHT_ADC_VALUE && adc_max > TOO_DARK_ADC_VALUE) {
+		uint8_t arrow_diff = (uint8_t)(1.28*(float)ff_combined);
+		draw_asset(&arrow, arrow_diff, 56); //Arrow on the rainbow
+	}
 
 	draw_asset(&flicker_text_flicker_level, 0, 61); //Text "уровень пульсаций"
 
@@ -136,8 +152,8 @@ void render_flicker_screen() {
 	int16_t text_start_x, text_start_y; //not used
 	uint16_t text_width, text_height;
 
-	framebuffer.getTextBounds(flicker_percents,
-														cursor_x,
+	framebuffer.getTextBounds(flicker_percents,  //Fucking magic to
+														cursor_x,					 //align text horizontally.
 														cursor_y,
 														&text_start_x,
 														&text_start_y,
@@ -147,12 +163,13 @@ void render_flicker_screen() {
 
 	cursor_x = (ST7735_TFT_WIDTH-text_width)/2;
 	framebuffer.setCursor(cursor_x, cursor_y);
-  framebuffer.print(flicker_percents);
 
-
-
-
-
+	if (adc_min < TOO_LIGHT_ADC_VALUE && adc_max > TOO_DARK_ADC_VALUE) {
+		framebuffer.print(flicker_percents);
+	}
+	else {
+		draw_asset(&flicker_text_no_data_big, 0, 78); //Text "Н/Д"
+	}
 
 	framebuffer.setFont();
 
@@ -163,6 +180,14 @@ void render_flicker_screen() {
 
 
 	//------ Graph render ------//
+	uint16_t graph_color = 0;
+
+	if (adc_min < TOO_LIGHT_ADC_VALUE && adc_max > TOO_DARK_ADC_VALUE) {
+		graph_color = ST7735_TFT_GREEN;
+	}
+	else {
+		graph_color = ST7735_TFT_DARK_GREEN;
+	}
 
 	//Normal cleaning of the graph part
 	//framebuffer.fillRoundRect(GRAPH_X, GRAPH_Y, GRAPH_WIDTH, GRAPH_Y+GRAPH_HEIGHT, 0, ST7735_TFT_BLACK);
@@ -187,14 +212,14 @@ void render_flicker_screen() {
 		if (current_colon == 0) {
 			framebuffer.drawPixel(current_colon, //The first point is drawn as a pixel because it has no past point
 										ST7735_TFT_HEIGHT-G_graph_values[current_colon],
-										ST7735_TFT_GREEN);
+										graph_color);
 		}
 		else {
 			framebuffer.drawLine(current_colon-1,  //The following points are drawn as lines to prevent gaps between individual points on steep hillsides
 										ST7735_TFT_HEIGHT-G_graph_values[current_colon-1],
 										current_colon,
 										ST7735_TFT_HEIGHT-G_graph_values[current_colon],
-										ST7735_TFT_GREEN);
+										graph_color);
 		}
 	}
 
@@ -386,6 +411,7 @@ void measure_flicker() {
 	G_flicker_simple = flicker_simple_uint;
 	G_flicker_freq = freq;
 	G_adc_values_max = adc_values_max;
+	G_adc_values_min = adc_values_min;
 
 
 	//Graph data
@@ -498,10 +524,10 @@ void setup(void) {
   LightSensor.begin();
 
   framebuffer.initR(INITR_BLACKTAB);
-	framebuffer.cp437(true);
+	framebuffer.cp437(true); //Support for сyrillic in the standard font (works with the patched glcdfont.c)
 	framebuffer.fillScreen(ST7735_TFT_BLACK);
 	framebuffer.display();
-	//
+
 
 	Serial.begin(115200);
   Serial.print("\n\nNPLM-1 Start..");
