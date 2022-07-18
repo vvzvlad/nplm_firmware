@@ -168,7 +168,7 @@ void render_flicker_screen() {
 		framebuffer.print(flicker_percents);
 	}
 	else {
-		draw_asset(&flicker_text_no_data_big, 0, 78); //Text "Н/Д"
+		draw_asset(&flicker_text_no_data_big, 0, 79); //Text "Н/Д"
 	}
 
 	framebuffer.setFont();
