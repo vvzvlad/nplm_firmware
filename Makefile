@@ -23,7 +23,7 @@ git_commit:
 
 git_commit_wait:
 	@echo "-----> Press enter for NOT git commit & push within 4 seconds <-----"
-	@read -t 4 -n 1 && exit 0 ||
+	@read -t 4 -n 1 && exit 0 || git add . ; git commit -m "Auto(press enter): `date +'%Y-%m-%d %H:%M:%S'`" ; git remote | xargs -L1 git push --all
 
 miniterm:
 	@miniterm.py /dev/tty.usbserial* 115200

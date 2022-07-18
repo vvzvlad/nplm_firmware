@@ -14,6 +14,9 @@
 #include <EncButton.h>
 #include <images.h>
 
+#include "GyverFilters.h"
+
+
 
 //Debug: Serial.println(__LINE__);
 
@@ -56,24 +59,38 @@
 
 #define MAX_FREQ 								300
 
-#define TS_MEASURE_LIGHT				0
-#define TS_MEASURE_FLICKER			1
-#define TS_RENDER_FLICKER		2
-#define TS_RENDER_LIGHT			3
-#define TS_RESERVED							4
-#define TS_DEBUG								5
-#define TS_RENDER_BOOT					6
-#define TS_RENDER_SHUTDOWN			7
+enum APPS {
+	APP_BOOT,
+	APP_FLICKER,
+	APP_LIGHT,
+	APP_HELP,
+	APP_SHUTDOWN,
+	APP_UNKNOWN
+};
 
-#define TS_MAX_THREAD						8
-
+enum TASKS {
+	TS_MEASURE_LIGHT,
+	TS_MEASURE_FLICKER,
+	TS_RENDER_FLICKER,
+	TS_RENDER_LIGHT,
+	TS_RENDER_BOOT,
+	TS_RENDER_SHUTDOWN,
+	TS_DEBUG,
+	TS_MAX,
+};
 
 typedef Adafruit_ST7735 display_t;
 typedef Adafruit_GFX_Buffer<display_t> GFXBuffer_t;
 GFXBuffer_t framebuffer = GFXBuffer_t(ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT, display_t(ST7735_TFT_CS, ST7735_TFT_DC, ST7735_TFT_RST));
 BH1750FVI LightSensor(BH1750FVI::k_DevModeContLowRes);
 EncButton<EB_CALLBACK, BUTTON_PIN> btn(INPUT);
-TickerScheduler ts(TS_MAX_THREAD);
+TickerScheduler ts(TS_MAX);
+
+//Filters
+GMedian<5, uint16_t> flicker_freq_filter;
+GMedian<5, uint8_t> flicker_simple_filter;
+GMedian<5, uint8_t> flicker_gost_filter;
+GMedian<5, uint16_t> lum_lum_filter;
 
 volatile uint16_t G_adc_correction = 0;
 
@@ -83,24 +100,17 @@ volatile uint16_t G_flicker_freq = 0;
 volatile uint16_t G_adc_values_max = 1;
 volatile uint16_t G_adc_values_min = MAX_ADC_VALUE;
 volatile uint8_t G_graph_values[GRAPH_WIDTH] = {};
+volatile uint32_t G_min_free_mem = 1000*1000*1000;
 
 volatile uint16_t G_lum = 0;
 
-enum APPS {
-	BOOT,
-	FLICKER,
-	LIGHT,
-	HELP,
-	SHUTDOWN,
-	UNKNOWN
-};
-
-volatile uint16_t G_app_runned = UNKNOWN;
+volatile uint16_t G_app_runned = APP_UNKNOWN;
 
 void draw_asset(const asset_t *asset, uint8_t x, uint8_t y) {
   uint8_t h = pgm_read_byte(&asset->height);
 	uint8_t w = pgm_read_byte(&asset->width);
 	framebuffer.drawRGBBitmap(x, y, asset->image, w, h);
+	free_mem_calc();
 }
 
 
@@ -119,6 +129,7 @@ uint16_t get_adc_correction_value(uint16_t correction_catch_time_ms) {
 	//Serial.print(correction_value);
 	//Serial.print("\n\n");
 
+	free_mem_calc();
 	return correction_value;
 }
 
@@ -147,8 +158,8 @@ void render_light_screen() {
 	framebuffer.setFont(&verdana_bold12pt7b); //LARGE text font
 	framebuffer.setTextSize(0);
 	String lux_value;
-	if (lum < 1000) lux_value = (String)lum+" lux";
-	else if (lum >= 1000) lux_value = (String)(lum/1000)+"k lux";
+	if (lum < 1000)					lux_value = (String)lum+" lux";
+	else if (lum >= 1000) 	lux_value = (String)(lum/1000)+"k lux";
 
 
 	int8_t cursor_x = 0, cursor_y = 100;
@@ -170,6 +181,7 @@ void render_light_screen() {
 	framebuffer.setFont(); //Reset LARGE text font to the default
 
 	framebuffer.display();
+	free_mem_calc();
 }
 
 
@@ -186,6 +198,8 @@ void render_flicker_screen() {
 
 	uint8_t ff_combined = 666; //FF = Flicker + Freq, combined for total lamp score, abstract percent
 
+
+
 	//Flicker with a frequency greater than 300 Hz is considered safe, so it does not count in the rating
 	if (freq >= 0 && freq <= 250) 									ff_combined = flicker;
 	else if (freq > 250 && freq <= 300) 						ff_combined = flicker*(float)(((50-(freq-250)))/50);
@@ -200,6 +214,7 @@ void render_flicker_screen() {
 
 	if (adc_min > TOO_LIGHT_ADC_VALUE)							draw_asset(&flicker_msg_too_big_lum, 0, 0);
 	if (adc_max < TOO_DARK_ADC_VALUE)								draw_asset(&flicker_msg_too_low_lum, 0, 0);
+	//TODO:как может быть уровень пульсаций y/д, но "лампа хорошая"??
 
 
 	draw_asset(&flicker_rainbow, 0, 39); //Rainbow
@@ -311,6 +326,7 @@ void render_flicker_screen() {
 
 	//------Transfer image------
 	framebuffer.display();
+	free_mem_calc();
 }
 
 
@@ -391,7 +407,7 @@ uint16_t calc_frequency(uint16_t *adc_values_array, uint16_t adc_values_min_max_
 	//}
 	//Serial.print("\n");
 
-
+	free_mem_calc();
 	return (uint16_t)freq;
 }
 
@@ -451,8 +467,8 @@ void measure_flicker() {
 
 	//Applying Correction
 	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-		if (adc_values[i] <= G_adc_correction) { adc_values[i] = 0;  }
-		else { adc_values[i] = adc_values[i] - G_adc_correction; }
+		if 		(adc_values[i] <= G_adc_correction) { adc_values[i] = 0;  }
+		else 																			{ adc_values[i] = adc_values[i] - G_adc_correction; }
 	}
 
 	//Calculating the maximum, minimum, average, average between the maximum and minimum values (for frequency measure)
@@ -475,11 +491,14 @@ void measure_flicker() {
 	flicker_simple_uint = (uint8_t)flicker_simple;
 
 	//Flicker frequency calculation
-	uint16_t freq = calc_frequency(adc_values, adc_values_min_max_mean, catch_time_us);
+	uint16_t freq = 0;
 
-	G_flicker_gost = flicker_gost_uint;
-	G_flicker_simple = flicker_simple_uint;
-	G_flicker_freq = freq;
+	if (flicker_simple > 2) 	freq = calc_frequency(adc_values, adc_values_min_max_mean, catch_time_us);
+	else											freq = 0; //At low flicker level the frequency count is wrong and strobes
+
+	G_flicker_gost = flicker_gost_filter.filtered(flicker_gost_uint);
+	G_flicker_simple = flicker_simple_filter.filtered(flicker_simple_uint);
+	G_flicker_freq = flicker_freq_filter.filtered(freq);
 	G_adc_values_max = adc_values_max;
 	G_adc_values_min = adc_values_min;
 
@@ -514,18 +533,14 @@ void measure_flicker() {
 	//Serial.print(flicker_gost);
 	//Serial.print(", flicker_simple:");
 	//Serial.print(flicker_simple);
+	free_mem_calc();
 }
 
 
 void measure_light() {
   uint16_t lum = LightSensor.GetLightIntensity();
-	G_lum = lum;
-	//framebuffer.fillScreen(ST7735_TFT_BLACK);
-  //framebuffer.setCursor(0, 0);
-	//framebuffer.setTextColor(ST7735_TFT_WHITE);
-	//framebuffer.setTextSize(0);
-	//framebuffer.println((String)"Light:"+lum+" lx");
-	//framebuffer.display();
+	G_lum = lum_lum_filter.filtered(lum);
+	free_mem_calc();
 }
 
 
@@ -535,27 +550,27 @@ void change_app(APPS target_app){
 	ts.disableAll();
 	ts.enable(TS_DEBUG);
 
-	if (target_app == FLICKER) {
+	if (target_app == APP_FLICKER) {
 		ts.enable(TS_MEASURE_FLICKER);
 		ts.enable(TS_RENDER_FLICKER);
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
 		return;
 	}
 
-	if (target_app == LIGHT) {
+	if (target_app == APP_LIGHT) {
 		ts.enable(TS_MEASURE_LIGHT);
 		ts.enable(TS_RENDER_LIGHT);
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
 		return;
 	}
 
-	if (target_app == BOOT) {
+	if (target_app == APP_BOOT) {
 		ts.enable(TS_RENDER_BOOT);
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
 		return;
 	}
 
-	if (target_app == SHUTDOWN) {
+	if (target_app == APP_SHUTDOWN) {
 		ts.enable(TS_RENDER_SHUTDOWN);
 		//No clear screen — this applicationdraws the interface
 		//on top of the old canvas, it is a popup window
@@ -566,10 +581,11 @@ void change_app(APPS target_app){
 void button_click_handler() { //Switch applications cyclically at the touch of a button
 	Serial.print("Click\n");
 
-	if 			(G_app_runned == FLICKER) 		change_app(LIGHT);
-	else if (G_app_runned == LIGHT) 			change_app(FLICKER);
-	else if (G_app_runned == SHUTDOWN) 		change_app(BOOT); 		//Simulate rebooting
-	else 																	change_app(SHUTDOWN); //strange behavior, fall down paws upwards
+	if 			(G_app_runned == APP_FLICKER) 		change_app(APP_LIGHT);
+	else if (G_app_runned == APP_LIGHT) 			change_app(APP_FLICKER);
+	else if (G_app_runned == APP_SHUTDOWN) 		change_app(APP_BOOT); 		//Simulate rebooting
+	else 																			change_app(APP_SHUTDOWN); //strange behavior, fall down paws upwards
+	free_mem_calc();
 }
 
 void button_holded_handler() {
@@ -579,7 +595,8 @@ void button_holded_handler() {
 
 void button_hold_handler() { //A long press to turn it off
   Serial.print("Hold\n");
-	change_app(SHUTDOWN);
+	change_app(APP_SHUTDOWN);
+	free_mem_calc();
 }
 
 
@@ -602,7 +619,8 @@ void boot_screen_render() {
 	//Serial.print(", OK.\n");
 
 	delay(2000);
-	change_app(FLICKER);
+	change_app(APP_FLICKER);
+	free_mem_calc();
 }
 
 void shutdown_screen_render() {
@@ -613,13 +631,20 @@ void shutdown_screen_render() {
 	framebuffer.println(utf8rus("Выключение..."));
 	framebuffer.display();
 	ts.disableAll(); //Freeze until reboot
+	free_mem_calc();
+}
+
+void free_mem_calc() {
+	uint32_t current_free_mem = system_get_free_heap_size();
+	if (G_min_free_mem > current_free_mem) G_min_free_mem = current_free_mem;
 }
 
 
-
-void free_mem_print() {
+void debug_print() {
 	Serial.print("\nFree memory: ");
   Serial.print(system_get_free_heap_size());
+	Serial.print(", min free memory: ");
+	Serial.print(G_min_free_mem);
 	Serial.print("\n");
 }
 
@@ -654,18 +679,19 @@ void setup(void) {
   Serial.print("\n\nNPLM-1 Start..");
 
 
-	ts.add(TS_MEASURE_LIGHT, 200, [&](void *) { measure_light(); }, nullptr, false);
-	ts.add(TS_MEASURE_FLICKER, 200, [&](void *) { measure_flicker(); }, nullptr, false);
-	ts.add(TS_RENDER_FLICKER, 200, [&](void *) { render_flicker_screen(); }, nullptr, false);
-	ts.add(TS_RENDER_LIGHT, 200, [&](void *) { render_light_screen(); }, nullptr, false);
-	ts.add(TS_DEBUG, 5000, [&](void *) { free_mem_print(); }, nullptr, false);
-	ts.add(TS_RENDER_BOOT, 200, [&](void *) { boot_screen_render(); }, nullptr, false);
-	ts.add(TS_RENDER_SHUTDOWN, 200, [&](void *) { shutdown_screen_render(); }, nullptr, false);
+	ts.add(TS_MEASURE_LIGHT, 			200,  [&](void *) { measure_light(); 				  	}, nullptr, false);
+	ts.add(TS_MEASURE_FLICKER, 		200,  [&](void *) { measure_flicker(); 					}, nullptr, false);
+	ts.add(TS_RENDER_FLICKER, 		200,  [&](void *) { render_flicker_screen();  	}, nullptr, false);
+	ts.add(TS_RENDER_LIGHT, 			200,  [&](void *) { render_light_screen(); 			}, nullptr, false);
+	ts.add(TS_DEBUG, 							5000, [&](void *) { debug_print(); 							}, nullptr, false);
+	ts.add(TS_RENDER_BOOT, 				200,  [&](void *) { boot_screen_render(); 			}, nullptr, false);
+	ts.add(TS_RENDER_SHUTDOWN, 		200,  [&](void *) { shutdown_screen_render(); 	}, nullptr, false);
 	ts.disableAll();
 
 	ts.enable(TS_DEBUG);
 
-	change_app(BOOT);
+	free_mem_calc();
+	change_app(APP_BOOT);
 }
 
 void loop() {
