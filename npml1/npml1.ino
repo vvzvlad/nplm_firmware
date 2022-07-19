@@ -601,66 +601,68 @@ void measure_light() {
 void change_app(APPS target_app){
 	if (G_app_runned == target_app) {return;}
 
-	if (target_app == APP_FLICKER_SIMPLE ||
-				target_app == APP_FLICKER_GOST ||
-				target_app == APP_LIGHT) {
-		if (G_last_app != APP_UNKNOWN && G_flag_first_run == 1) target_app = G_last_app;
+	if (target_app == APP_FLICKER_SIMPLE || target_app == APP_FLICKER_GOST || target_app == APP_LIGHT) {
+		//Serial.println(__LINE__);
+		//Serial.println(G_last_app);
+		//Serial.println(G_flag_first_run);
+		if (G_last_app != APP_UNKNOWN && G_flag_first_run == 1) {
+			target_app = G_last_app;
+			G_flag_first_run = 0;
+		}
 	}
 
 
-	G_flag_first_run = 0;
-	G_last_app = target_app;
 
 	G_app_runned = target_app;
 	ts.disableAll();
 	ts.enable(TS_DEBUG);
+	ts.enable(TS_MEASURE_FLICKER); //To quickly update the values when switching
+	ts.enable(TS_MEASURE_LIGHT);   //applications, the metering processes is always on
 
 	if (target_app == APP_FLICKER_SIMPLE) {
 		G_F_type = FT_SIMPLE;
-		ts.enable(TS_MEASURE_FLICKER);
-		ts.enable(TS_MEASURE_LIGHT); //To quickly update the brightness value when switching applications, the brightness metering process is always on
 		ts.enable(TS_RENDER_FLICKER);
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		EEPROM.put(EEPROM_LAST_APP, G_last_app);
-		EEPROM.commit();
+		EEPROM.put(EEPROM_LAST_APP, target_app); EEPROM.commit();
+		Serial.print(F("Run APP_FLICKER_SIMPLE app\n")); term_post_command();
 		return;
 	}
 
 	if (target_app == APP_FLICKER_GOST) {
 		G_F_type = FT_GOST;
-		ts.enable(TS_MEASURE_FLICKER);
-		ts.enable(TS_MEASURE_LIGHT); //To quickly update the brightness value when switching applications, the brightness metering process is always on
 		ts.enable(TS_RENDER_FLICKER);
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		EEPROM.put(EEPROM_LAST_APP, G_last_app);
-		EEPROM.commit();
+		EEPROM.put(EEPROM_LAST_APP, target_app); EEPROM.commit();
+		Serial.print(F("Run APP_FLICKER_GOST app\n")); term_post_command();
 		return;
 	}
 
 	if (target_app == APP_LIGHT) {
-		ts.enable(TS_MEASURE_LIGHT);
 		ts.enable(TS_RENDER_LIGHT);
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		EEPROM.put(EEPROM_LAST_APP, G_last_app);
-		EEPROM.commit();
+		EEPROM.put(EEPROM_LAST_APP, target_app); EEPROM.commit();
+		Serial.print(F("Run APP_LIGHT app\n")); term_post_command();
 		return;
 	}
 
 	if (target_app == APP_BOOT) {
 		ts.enable(TS_RENDER_BOOT);
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
+		Serial.print(F("Run APP_BOOT app\n")); term_post_command();
 		return;
 	}
 
 	if (target_app == APP_CAL_HELP) {
 		ts.enable(TS_RENDER_CAL_HELP);
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
+		Serial.print(F("Run APP_CAL_HELP app\n")); term_post_command();
 		return;
 	}
 
 	if (target_app == APP_CAL_MEASURE) {
 		ts.enable(TS_RENDER_CAL_PROCESS);
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
+		Serial.print(F("Run APP_CAL_MEASURE app\n")); term_post_command();
 		return;
 	}
 
@@ -668,6 +670,7 @@ void change_app(APPS target_app){
 		ts.enable(TS_RENDER_SHUTDOWN);
 		//No clear screen — this application draws the interface on top
 		//of the old app canvas (like is a popup window)
+		Serial.print(F("Run APP_SHUTDOWN app\n")); term_post_command();
 		return;
 	}
 }
@@ -845,10 +848,10 @@ void data_print() {
 void term_help()
 {
     Serial.println(F("Console usage:"));
-    Serial.println(F("  help				Print this usage")); //todo: сделать настройку режимов и сохранение в eeprom
-		Serial.println(F("  data				Show all data"));
-		Serial.println(F("  reboot			Reboot"));
-		Serial.println(F("  erase				Erase all eeprom settings"));
+    Serial.println(F("  help			Print this usage")); //todo: сделать настройку режимов и сохранение в eeprom
+		Serial.println(F("  data			Show all data"));
+		Serial.println(F("  reboot		Reboot"));
+		Serial.println(F("  erase			Erase all eeprom settings"));
 }
 
 void term_unknown_command(const char *command)
@@ -875,9 +878,13 @@ void eeprom_clear() {
 }
 
 void setup(void) {
+	Serial.begin(115200);
+  Serial.print(F("\n\nNPLM-1 Start\n"));
+
 	WiFi.persistent(false); //Disable wifi settings recording in flash
 	WiFi.mode(WIFI_OFF); //Deactivate wifi
 	WiFi.forceSleepBegin(); //Disable radio module
+	Serial.print(F("Wifi disabled\n"));
 
 	//attachInterrupt(BUTTON_PIN, isr, CHANGE); //button interrupt
 	btn.setButtonLevel(HIGH);
@@ -887,8 +894,10 @@ void setup(void) {
 	btn.attach(HOLD_HANDLER, button_hold_handler);
 	//btn.attach(CLICKS_HANDLER, myClicks);
   //btn.attachClicks(5, fiveClicks);
+	Serial.print(F("Buttons triggers attach\n"));
 
   LightSensor.begin();
+	Serial.print(F("Light sensor initialized\n"));
 
 	EEPROM.begin(EEPROM_SIZE);
 	uint32_t eeprom_flag = 0xDEADBEEF;
@@ -898,21 +907,21 @@ void setup(void) {
 		eeprom_clear();
 		EEPROM.put(EEPROM_SIZE-4, eeprom_flag);
 		EEPROM.commit();
+		Serial.print(F("First start, eeprom clear and initialized\n"));
 	}
 	else{
 		EEPROM.get(EEPROM_LAST_APP, G_last_app);
 	}
-
+	Serial.print(F("EEPROM init\n"));
 
 
   framebuffer.initR(INITR_BLACKTAB);
 	framebuffer.cp437(true); //Support for сyrillic in the standard font (works with the patched glcdfont.c)
 	framebuffer.fillScreen(ST7735_TFT_BLACK);
 	framebuffer.display();
+	Serial.print(F("Framebuffer initialized\n"));
 
 
-	Serial.begin(115200);
-  Serial.print(F("\n\nNPLM-1 Start"));
 	term.setSerialEcho(true);
 	term.addCommand("data", data_print);
 	term.addCommand("help", term_help);
@@ -920,6 +929,7 @@ void setup(void) {
 	term.addCommand("erase", eeprom_clear);
 	term.setPostCommandHandler(term_post_command);
 	term.setDefaultHandler(term_unknown_command);
+	Serial.print(F("Terminal initialized\n"));
 
 
 	ts.add(TS_MEASURE_LIGHT, 			 200,  [&](void *) { measure_light(); 				  	}, nullptr, false);
@@ -932,8 +942,8 @@ void setup(void) {
 	ts.add(TS_RENDER_CAL_HELP, 		 100,  [&](void *) { cal_help_screen_render(); 		}, nullptr, false);
 	ts.add(TS_RENDER_CAL_PROCESS,  200,  [&](void *) { cal_measure_screen_render(); }, nullptr, false);
 	ts.disableAll();
-
 	ts.enable(TS_DEBUG);
+	Serial.print(F("Sheduler initialized\n"));
 
 	free_mem_calc();
 	change_app(APP_BOOT);
