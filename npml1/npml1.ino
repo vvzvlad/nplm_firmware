@@ -474,7 +474,7 @@ void luminance_render() {
 
 	//Drawing the labels "good light", "dark lamp"
 	if 			(score == SCORE_GOOD) 													draw_asset(&light_msg_good, 0, 0);
-	else if (score == SCORE_BAD || score == SCORE_NORMAL) 	draw_asset(&flicker_msg_too_low_lum, 0, 0); //TODO временно!
+	else if (score == SCORE_BAD || score == SCORE_NORMAL) 	draw_asset(&light_msg_bad, 0, 0);
 
 	draw_asset(&light_rainbow, 0, 39); //Rainbow
 
@@ -636,7 +636,7 @@ void flicker_render() {
 	if (score == SCORE_BAD) 				draw_asset(&flicker_msg_bad_lamp, 0, 0);
 	if (score == SCORE_TOO_LIGHT) 	draw_asset(&flicker_msg_too_big_lum, 0, 0);
 	if (score == SCORE_TOO_DARK) 		draw_asset(&flicker_msg_too_low_lum, 0, 0);
-	//if (score == SCORE_INACC) 			draw_asset(&flicker_msg_too_low_lum, 0, 0); //временно не рисуем ничего
+	if (score == SCORE_INACC) 			draw_asset(&flicker_msg_process, 0, 0);
 
 	draw_asset(&flicker_rainbow, 0, 39); //Rainbow
 
