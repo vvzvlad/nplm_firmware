@@ -41,3 +41,8 @@ enum FLIKER_TYPE_CALC {
 	FT_SIMPLE,
 	FT_GOST,
 };
+
+
+enum EEPROM_ADDR {
+	EEPROM_LAST_APP,
+};

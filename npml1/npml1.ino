@@ -17,6 +17,8 @@
 
 #include <GyverFilters.h>						// Filters library
 #include <GyverLBUF.h>							// Buffer library
+//#include <EEManager.h>							// EEPROM library
+#include <EEPROM.h>
 #include <ErriezSerialTerminal.h>		// Console library
 
 
@@ -63,6 +65,8 @@
 #define NO_FLICKER_FREQ_VALUE 	300 //Flicker with a frequency greater than 300 Hz is considered safe, so it does not count in the rating
 #define NO_FREQ_FLICKER_VALUE 	5   //At low flicker level the frequency count is wrong and strobes
 
+#define EEPROM_SIZE 		  			100
+
 typedef Adafruit_ST7735 display_t;
 typedef Adafruit_GFX_Buffer<display_t> GFXBuffer_t;
 GFXBuffer_t framebuffer = GFXBuffer_t(ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT, display_t(ST7735_TFT_CS, ST7735_TFT_DC, ST7735_TFT_RST));
@@ -97,6 +101,8 @@ GyverLBUF<uint8_t, 128> lum_graph_buf;
 
 volatile uint16_t G_lum = 0;
 
+volatile APPS G_last_app = APP_UNKNOWN;
+volatile uint8_t G_flag_first_run = 1;
 volatile APPS G_app_runned = APP_UNKNOWN;
 volatile FLIKER_TYPE_CALC G_F_type = FT_SIMPLE;
 
@@ -594,6 +600,17 @@ void measure_light() {
 
 void change_app(APPS target_app){
 	if (G_app_runned == target_app) {return;}
+
+	if (target_app == APP_FLICKER_SIMPLE ||
+				target_app == APP_FLICKER_GOST ||
+				target_app == APP_LIGHT) {
+		if (G_last_app != APP_UNKNOWN && G_flag_first_run == 1) target_app = G_last_app;
+	}
+
+
+	G_flag_first_run = 0;
+	G_last_app = target_app;
+
 	G_app_runned = target_app;
 	ts.disableAll();
 	ts.enable(TS_DEBUG);
@@ -604,6 +621,8 @@ void change_app(APPS target_app){
 		ts.enable(TS_MEASURE_LIGHT); //To quickly update the brightness value when switching applications, the brightness metering process is always on
 		ts.enable(TS_RENDER_FLICKER);
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
+		EEPROM.put(EEPROM_LAST_APP, G_last_app);
+		EEPROM.commit();
 		return;
 	}
 
@@ -613,6 +632,8 @@ void change_app(APPS target_app){
 		ts.enable(TS_MEASURE_LIGHT); //To quickly update the brightness value when switching applications, the brightness metering process is always on
 		ts.enable(TS_RENDER_FLICKER);
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
+		EEPROM.put(EEPROM_LAST_APP, G_last_app);
+		EEPROM.commit();
 		return;
 	}
 
@@ -620,6 +641,8 @@ void change_app(APPS target_app){
 		ts.enable(TS_MEASURE_LIGHT);
 		ts.enable(TS_RENDER_LIGHT);
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
+		EEPROM.put(EEPROM_LAST_APP, G_last_app);
+		EEPROM.commit();
 		return;
 	}
 
@@ -812,30 +835,28 @@ void data_print() {
 	Serial.println((String)F("ADC values max: \t")+G_adc_values_max+F(" adc points"));
 	Serial.println((String)F("ADC values min: \t")+G_adc_values_min+F(" adc points"));
 	Serial.println((String)F("Luminance: \t\t")+G_lum+F(" lx"));
+	Serial.println((String)F("Free memory: \t\t")+system_get_free_heap_size()+F(" bytes"));
+	Serial.println((String)F("Free memory (min): \t")+G_min_free_mem+F(" bytes"));
 	Serial.println((String)F("App running: \t\tenum APP #")+G_app_runned+F(""));
+	Serial.println((String)F("Last app (eeprom): \tenum APP #")+EEPROM.read(EEPROM_LAST_APP)+F(""));
 	free_mem_calc();
-}
-
-void memory_print() {
-	Serial.print(F("\nFree memory: "));
-  Serial.print(system_get_free_heap_size());
-	Serial.print(F(", min free memory: "));
-	Serial.print(G_min_free_mem);
-	Serial.print("\n");
 }
 
 void term_help()
 {
     Serial.println(F("Console usage:"));
-    Serial.println(F("  help          		 Print this usage")); //todo: сделать настройку режимов и сохранение в eeprom
-    Serial.println(F("  mem                Show memory free"));
-		Serial.println(F("  data               Show measures"));
+    Serial.println(F("  help				Print this usage")); //todo: сделать настройку режимов и сохранение в eeprom
+		Serial.println(F("  data				Show all data"));
+		Serial.println(F("  reboot			Reboot"));
+		Serial.println(F("  erase				Erase all eeprom settings"));
 }
 
 void term_unknown_command(const char *command)
 {
     Serial.print(F("Unknown command: "));
     Serial.println(command);
+		Serial.println("\n");
+		term_help();
 }
 
 void term_post_command() {
@@ -844,6 +865,13 @@ void term_post_command() {
 
 void isr() {
   btn.tickISR();
+}
+
+void eeprom_clear() {
+  for (int i = 0; i < EEPROM_SIZE; i++) { EEPROM.write(i, 0); }
+	EEPROM.commit();
+	Serial.print(F("EEPROM erase complete\n"));
+	term_post_command();
 }
 
 void setup(void) {
@@ -862,6 +890,21 @@ void setup(void) {
 
   LightSensor.begin();
 
+	EEPROM.begin(EEPROM_SIZE);
+	uint32_t eeprom_flag = 0xDEADBEEF;
+	uint32_t eeprom_value = 0;
+	EEPROM.get(EEPROM_SIZE-4, eeprom_value);
+	if (eeprom_value != eeprom_flag){
+		eeprom_clear();
+		EEPROM.put(EEPROM_SIZE-4, eeprom_flag);
+		EEPROM.commit();
+	}
+	else{
+		EEPROM.get(EEPROM_LAST_APP, G_last_app);
+	}
+
+
+
   framebuffer.initR(INITR_BLACKTAB);
 	framebuffer.cp437(true); //Support for сyrillic in the standard font (works with the patched glcdfont.c)
 	framebuffer.fillScreen(ST7735_TFT_BLACK);
@@ -871,9 +914,10 @@ void setup(void) {
 	Serial.begin(115200);
   Serial.print(F("\n\nNPLM-1 Start"));
 	term.setSerialEcho(true);
-	term.addCommand("mem", memory_print);
 	term.addCommand("data", data_print);
 	term.addCommand("help", term_help);
+	term.addCommand("reboot", ESP.restart);
+	term.addCommand("erase", eeprom_clear);
 	term.setPostCommandHandler(term_post_command);
 	term.setDefaultHandler(term_unknown_command);
 
