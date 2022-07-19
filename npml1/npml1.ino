@@ -1,21 +1,23 @@
+#include "nplm1.h"
 #include <ESP8266WiFi.h>
 
+#include <SPI.h>    								// Core SPI library for display
 #include <Adafruit_GFX.h>    				// Core graphics library
 #include <Adafruit_ST7735.h> 				// Hardware-specific library for ST7735
 #include <Adafruit_GFX_Buffer.h>		// Framebuffer library to speed up rendering
-#include <utf8rus.h>
-#include <verdana_bold_12.h>
 
-#include <SPI.h>
+#include <utf8rus.h>    						// Cyrillic support library
+#include <verdana_bold_12.h>				// External font
+#include <images.h>									// Assets
 
-#include <BH1750FVI.h>
+#include <BH1750FVI.h> 							// Brightness sensor library
 
-#include <TickerScheduler.h>
-#include <EncButton.h>
-#include <images.h>
+#include <TickerScheduler.h>				// Scheduler library
+#include <EncButton.h> 							// Button library
 
-#include "GyverFilters.h"
-#include <ErriezSerialTerminal.h>
+#include <GyverFilters.h>						// Filters library
+#include <GyverLBUF.h>							// Buffer library
+#include <ErriezSerialTerminal.h>		// Console library
 
 
 //Debug: Serial.println(__LINE__);
@@ -61,30 +63,6 @@
 #define NO_FLICKER_FREQ_VALUE 	300 //Flicker with a frequency greater than 300 Hz is considered safe, so it does not count in the rating
 #define NO_FREQ_FLICKER_VALUE 	5   //At low flicker level the frequency count is wrong and strobes
 
-enum APPS {
-	APP_BOOT,
-	APP_FLICKER,
-	APP_LIGHT,
-	APP_HELP,
-	APP_SHUTDOWN,
-	APP_CAL_HELP,
-	APP_CAL_MEASURE,
-	APP_UNKNOWN
-};
-
-enum TASKS {
-	TS_MEASURE_LIGHT,
-	TS_MEASURE_FLICKER,
-	TS_RENDER_FLICKER,
-	TS_RENDER_LIGHT,
-	TS_RENDER_BOOT,
-	TS_RENDER_SHUTDOWN,
-	TS_RENDER_CAL_HELP,
-	TS_RENDER_CAL_PROCESS,
-	TS_DEBUG,
-	TS_MAX,
-};
-
 typedef Adafruit_ST7735 display_t;
 typedef Adafruit_GFX_Buffer<display_t> GFXBuffer_t;
 GFXBuffer_t framebuffer = GFXBuffer_t(ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT, display_t(ST7735_TFT_CS, ST7735_TFT_DC, ST7735_TFT_RST));
@@ -99,6 +77,7 @@ GMedian<2, uint16_t> lum_lum_filter;
 GMedian<5, uint16_t> cal_filter;
 GKalman flicker_simple_filter(3, 0.3);
 GKalman flicker_gost_filter(3, 0.3);
+GyverLBUF<uint8_t, 6> flicker_accuracy_buf;
 
 volatile uint16_t G_adc_correction = 0;
 
@@ -114,9 +93,12 @@ volatile uint8_t G_cal_run_counter = 0;
 volatile uint8_t G_cal_help_counter = 0;
 volatile uint8_t G_cal_help_text_y = 100;
 
+GyverLBUF<uint8_t, 128> lum_graph_buf;
+
 volatile uint16_t G_lum = 0;
 
-volatile uint16_t G_app_runned = APP_UNKNOWN;
+volatile APPS G_app_runned = APP_UNKNOWN;
+volatile FLIKER_TYPE_CALC G_F_type = FT_SIMPLE;
 
 void draw_asset(const asset_t *asset, uint8_t x, uint8_t y) {
   uint8_t h = pgm_read_byte(&asset->height);
@@ -145,10 +127,12 @@ uint16_t get_adc_correction_value() {
 
 void render_light_screen() {
 	uint16_t lum = G_lum;
+	uint16_t score_color = ST7735_TFT_GREEN; //временно
 
 	framebuffer.setTextColor(ST7735_TFT_WHITE);
 	framebuffer.fillRoundRect(0, 0, ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT-GRAPH_HEIGHT, 0, ST7735_TFT_BLACK); //Clearing only the image above the graph!
 
+	lum_graph_buf.write(lum);
 
 	//Drawing the labels "good lamp", "bad lamp", "normal lamp"
 	if (lum >= 0 && lum <= 200) 	draw_asset(&flicker_msg_too_low_lum, 0, 0); //TODO временно!
@@ -190,6 +174,26 @@ void render_light_screen() {
 	framebuffer.print(lux_value);
 	framebuffer.setFont(); //Reset LARGE text font to the default
 
+
+	//------ Graph render ------//
+
+	//Normal cleaning of the graph part
+	framebuffer.fillRoundRect(GRAPH_X, GRAPH_Y, GRAPH_WIDTH, GRAPH_Y+GRAPH_HEIGHT, 0, ST7735_TFT_BLACK);
+	for (uint8_t current_colon = GRAPH_X; current_colon < GRAPH_WIDTH; current_colon++) {
+		if (current_colon == 0) {
+			framebuffer.drawPixel(current_colon, //The first point is drawn as a pixel because it has no past point
+										ST7735_TFT_HEIGHT-lum_graph_buf.read(current_colon),
+										score_color);
+		}
+		else {
+			framebuffer.drawLine(current_colon-1,  //The following points are drawn as lines to prevent gaps between individual points on steep hillsides
+										ST7735_TFT_HEIGHT-lum_graph_buf.read(current_colon-1),
+										current_colon,
+										ST7735_TFT_HEIGHT-lum_graph_buf.read(current_colon),
+										score_color);
+		}
+	}
+
 	framebuffer.display();
 	free_mem_calc();
 }
@@ -197,51 +201,85 @@ void render_light_screen() {
 
 
 void render_flicker_screen() {
-	uint8_t flicker = G_flicker_simple; //or G_flicker_gost
+	uint8_t flicker;
 	uint16_t freq = G_flicker_freq;
 	uint16_t adc_max = G_adc_values_max;
 	uint16_t adc_min = G_adc_values_min;
+	uint8_t ff_rating = 666;
+	ACCURACY accuracy_flag = A_ACCURACY; //The flag of accuracy of the measured number, is set to 0 if the number changes quickly
+	uint16_t score_color;
+	SCORE score;
 
+	if (G_F_type == FT_SIMPLE) 	flicker = G_flicker_simple;
+	if (G_F_type == FT_GOST) 		flicker = G_flicker_gost;
+
+	//------ Calc combined FF rating ------ //FF = Flicker + Freq, combined rating for total lamp score, abstract percent
+	if (freq >= 0 && freq <= NO_FLICKER_FREQ_VALUE-50) 													ff_rating = flicker;
+	else if (freq > NO_FLICKER_FREQ_VALUE-50 && freq <= NO_FLICKER_FREQ_VALUE) 	ff_rating = flicker*(float)(((50-(freq-(NO_FLICKER_FREQ_VALUE-50))))/50);
+	else if (freq > NO_FLICKER_FREQ_VALUE) 																			ff_rating = 0;
+	else 																																				ff_rating = 666;
+	//Flicker with a frequency greater than 300(NO_FLICKER_FREQ_VALUE) Hz is considered safe, so it does not count in the rating
+
+	//------ Calc accuracy flag ------//
+	flicker_accuracy_buf.write(flicker);
+	uint8_t diff = 2;  //TODO в дефайны!
+	uint8_t flicker_acc_max_level;
+	uint8_t flicker_acc_min_level;
+	if (flicker+diff > 255) flicker_acc_max_level = 255;
+	else flicker_acc_max_level = flicker+diff;
+	if (flicker-diff < 0) flicker_acc_min_level = 0;
+	else flicker_acc_min_level = flicker-diff;
+	for (int j = 0; j < 4; j++) {
+		if (flicker_accuracy_buf.read(j) < flicker_acc_min_level ||
+				flicker_accuracy_buf.read(j) > flicker_acc_max_level)
+				accuracy_flag = A_INACCURACY;
+	}
+
+	//------ Calc text score ------//
+	if 			(adc_min > TOO_LIGHT_ADC_VALUE) 				score = SCORE_TOO_LIGHT;
+	else if (adc_max < TOO_DARK_ADC_VALUE)					score = SCORE_TOO_DARK;
+	else if (accuracy_flag == A_INACCURACY)					score = SCORE_INACC;
+	else if (ff_rating >= 0 && ff_rating <= 5)			score = SCORE_GOOD;
+	else if (ff_rating > 5 && ff_rating <= 35)			score = SCORE_NORMAL; //TODO в дефайны!
+	else if (ff_rating > 35)												score = SCORE_BAD;
+
+	if (score == SCORE_GOOD) 				score_color = ST7735_TFT_GREEN;
+	if (score == SCORE_NORMAL) 			score_color = ST7735_TFT_YELLOW;
+	if (score == SCORE_BAD) 				score_color = ST7735_TFT_RED;
+	if (score == SCORE_TOO_LIGHT) 	score_color = ST7735_TFT_GRAY;
+	if (score == SCORE_TOO_DARK) 		score_color = ST7735_TFT_GRAY;
+	if (score == SCORE_INACC) 			score_color = ST7735_TFT_GRAY;
+
+
+
+
+
+
+	//------ Start image rendering (text and graphics) ------//
 	framebuffer.setTextColor(ST7735_TFT_WHITE);
 	framebuffer.fillRoundRect(0, 0, ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT-GRAPH_HEIGHT, 0, ST7735_TFT_BLACK); //Clearing only the image above the graph!
 
-	//------ Calc combined score ------//
-
-	uint8_t ff_combined = 666; //FF = Flicker + Freq, combined for total lamp score, abstract percent
-
-
-
-	//Flicker with a frequency greater than 300(NO_FLICKER_FREQ_VALUE) Hz is considered safe, so it does not count in the rating
-	if (freq >= 0 && freq <= NO_FLICKER_FREQ_VALUE-50) 													ff_combined = flicker;
-	else if (freq > NO_FLICKER_FREQ_VALUE-50 && freq <= NO_FLICKER_FREQ_VALUE) 	ff_combined = flicker*(float)(((50-(freq-(NO_FLICKER_FREQ_VALUE-50))))/50);
-	else if (freq > NO_FLICKER_FREQ_VALUE) 																			ff_combined = 0;
-	else 																																				ff_combined = 666;
-
-	//Drawing the labels "good lamp", "bad lamp", "normal lamp"
-	if (ff_combined >= 0 && ff_combined <= 5) 			draw_asset(&flicker_msg_good_lamp, 0, 0); //TODO в дефайны!
-	else if (ff_combined > 5 && ff_combined <= 35) 	draw_asset(&flicker_msg_normal_lamp, 0, 0);
-	else if (ff_combined > 35) 											draw_asset(&flicker_msg_bad_lamp, 0, 0);
-	else  																					Serial.println((String)"FF score:"+ff_combined);
-
-	if (adc_min > TOO_LIGHT_ADC_VALUE)							draw_asset(&flicker_msg_too_big_lum, 0, 0);
-	if (adc_max < TOO_DARK_ADC_VALUE)								draw_asset(&flicker_msg_too_low_lum, 0, 0);
-	//TODO:как может быть уровень пульсаций y/д, но "лампа хорошая"??
-
+	//Drawing the labels "good lamp", "bad lamp", "normal lamp", etc
+	if (score == SCORE_GOOD) 				draw_asset(&flicker_msg_good_lamp, 0, 0);
+	if (score == SCORE_NORMAL) 			draw_asset(&flicker_msg_normal_lamp, 0, 0);
+	if (score == SCORE_BAD) 				draw_asset(&flicker_msg_bad_lamp, 0, 0);
+	if (score == SCORE_TOO_LIGHT) 	draw_asset(&flicker_msg_too_big_lum, 0, 0);
+	if (score == SCORE_TOO_DARK) 		draw_asset(&flicker_msg_too_low_lum, 0, 0);
+	//if (score == SCORE_INACC) 			draw_asset(&flicker_msg_too_low_lum, 0, 0); //временно не рисуем ничего
 
 	draw_asset(&flicker_rainbow, 0, 39); //Rainbow
 
-	if (adc_min < TOO_LIGHT_ADC_VALUE && adc_max > TOO_DARK_ADC_VALUE) {
-		uint8_t arrow_diff = (uint8_t)(1.28*(float)ff_combined);
+	if (score == SCORE_GOOD || score == SCORE_NORMAL || score == SCORE_BAD) {
+		uint8_t arrow_diff = (uint8_t)(1.28*(float)ff_rating);
 		draw_asset(&arrow, arrow_diff, 56); //Arrow on the rainbow
 	}
 
 	draw_asset(&flicker_text_flicker_level, 0, 61); //Text "уровень пульсаций"
 
 
-
-	//------ Draw percent text ------//
+	//------ Draw percent BIG text ------//
 	framebuffer.setFont(&verdana_bold12pt7b); //LARGE text font
-	framebuffer.setTextSize(0);
+	framebuffer.setTextSize(0); //External font is one and already the right size, no need scaling
 	String flicker_percents = (String)flicker+"%";
 
 	int8_t cursor_x = 0, cursor_y = 100;
@@ -256,20 +294,19 @@ void render_flicker_screen() {
 														&text_width,
 														&text_height);
 	//framebuffer.drawRect(text_start_x, text_start_y, text_width, text_height, ST7735_TFT_BLUE); //debug rect
-
 	cursor_x = (ST7735_TFT_WIDTH-text_width)/2;
 	framebuffer.setCursor(cursor_x, cursor_y);
 
-	if (adc_min < TOO_LIGHT_ADC_VALUE && adc_max > TOO_DARK_ADC_VALUE) {
-		framebuffer.setTextColor(ST7735_TFT_GRAY);
+	if (score == SCORE_GOOD || score == SCORE_NORMAL || score == SCORE_BAD || score == SCORE_INACC) {
+		framebuffer.setTextColor(score_color);
 		framebuffer.print(flicker_percents);
-		framebuffer.setTextColor(ST7735_TFT_WHITE);
 	}
-	else {
+	if (score == SCORE_TOO_DARK || score == SCORE_TOO_LIGHT) {
 		draw_asset(&flicker_text_no_data_big, 0, 80); //Text "Н/Д"
 	}
 
 	framebuffer.setFont(); //Reset LARGE text font to the default
+	framebuffer.setTextColor(ST7735_TFT_WHITE); //Reset text color to the default
 
 
 
@@ -278,14 +315,6 @@ void render_flicker_screen() {
 
 
 	//------ Graph render ------//
-	uint16_t graph_color = 0;
-
-	if (adc_min < TOO_LIGHT_ADC_VALUE && adc_max > TOO_DARK_ADC_VALUE) {
-		graph_color = ST7735_TFT_GREEN;
-	}
-	else {
-		graph_color = ST7735_TFT_DARK_GREEN;
-	}
 
 	//Normal cleaning of the graph part
 	framebuffer.fillRoundRect(GRAPH_X, GRAPH_Y, GRAPH_WIDTH, GRAPH_Y+GRAPH_HEIGHT, 0, ST7735_TFT_BLACK);
@@ -310,14 +339,14 @@ void render_flicker_screen() {
 		if (current_colon == 0) {
 			framebuffer.drawPixel(current_colon, //The first point is drawn as a pixel because it has no past point
 										ST7735_TFT_HEIGHT-G_graph_values[current_colon],
-										graph_color);
+										score_color);
 		}
 		else {
 			framebuffer.drawLine(current_colon-1,  //The following points are drawn as lines to prevent gaps between individual points on steep hillsides
 										ST7735_TFT_HEIGHT-G_graph_values[current_colon-1],
 										current_colon,
 										ST7735_TFT_HEIGHT-G_graph_values[current_colon],
-										graph_color);
+										score_color);
 		}
 	}
 
@@ -326,18 +355,15 @@ void render_flicker_screen() {
 	framebuffer.setTextColor(ST7735_TFT_WHITE);
 	framebuffer.setTextSize(1);
 	framebuffer.setCursor(90, 152);
-	//framebuffer.println((String)"Flicker simple:"+flicker_simple_uint);
-	//framebuffer.println((String)"Correction:"+G_adc_correction);
-	//framebuffer.println((String)"Average:"+adc_values_avg);
-	//framebuffer.println((String)"Max:"+adc_values_max);
-	//framebuffer.println((String)"Min:"+adc_values_min);
-	//framebuffer.println((String)"Tm:	"+((float)catch_time_us/1000)+"ms");
 	framebuffer.print((String)+G_flicker_freq+" Hz");
-	//framebuffer.println((String)"Light:"+LightSensor.GetLightIntensity()+" lx");
+
+	if (G_F_type == FT_GOST){
+		framebuffer.setCursor(0, 152);
+		framebuffer.print((String)"GOST");
+	}
 
 
-
-	//------Transfer image------
+	//------ Transfer image to display ------
 	framebuffer.display();
 	free_mem_calc();
 }
@@ -500,8 +526,17 @@ void measure_flicker() {
 	//Flicker level calculation
 	flicker_gost = ((float)adc_values_max-(float)adc_values_min)*100/(2*(float)adc_values_avg);
 	flicker_simple = ((float)adc_values_max-(float)adc_values_min)*100/((float)adc_values_max+(float)adc_values_min);
-	flicker_gost_uint = (uint8_t)flicker_gost;
-	flicker_simple_uint = (uint8_t)flicker_simple;
+
+	if (flicker_gost > 255) flicker_gost_uint = 255;
+	if (flicker_gost < 0) flicker_gost_uint = 0;
+	if (flicker_gost >= 0 && flicker_gost <= 255) flicker_gost_uint = (uint8_t)flicker_gost;
+
+	if (flicker_simple > 255) flicker_simple_uint = 255;
+	if (flicker_simple < 0) flicker_simple_uint = 0;
+	if (flicker_simple >= 0 && flicker_simple <= 255) flicker_simple_uint = (uint8_t)flicker_simple;
+
+	//flicker_gost_uint = (uint8_t)flicker_gost; //todo удалить
+	//flicker_simple_uint = (uint8_t)flicker_simple;
 
 	//Flicker frequency calculation
 	uint16_t freq = 0;
@@ -563,7 +598,17 @@ void change_app(APPS target_app){
 	ts.disableAll();
 	ts.enable(TS_DEBUG);
 
-	if (target_app == APP_FLICKER) {
+	if (target_app == APP_FLICKER_SIMPLE) {
+		G_F_type = FT_SIMPLE;
+		ts.enable(TS_MEASURE_FLICKER);
+		ts.enable(TS_MEASURE_LIGHT); //To quickly update the brightness value when switching applications, the brightness metering process is always on
+		ts.enable(TS_RENDER_FLICKER);
+		framebuffer.fillScreen(ST7735_TFT_BLACK);
+		return;
+	}
+
+	if (target_app == APP_FLICKER_GOST) {
+		G_F_type = FT_GOST;
 		ts.enable(TS_MEASURE_FLICKER);
 		ts.enable(TS_MEASURE_LIGHT); //To quickly update the brightness value when switching applications, the brightness metering process is always on
 		ts.enable(TS_RENDER_FLICKER);
@@ -608,13 +653,14 @@ void button_click_handler() { //Switch applications cyclically at the touch of a
 	Serial.print(F("Click\n"));
 	term_post_command();
 
-	if 			(G_app_runned == APP_FLICKER) 		change_app(APP_LIGHT); 				//clicking the button switching FLIKER->LIGHT
-	else if (G_app_runned == APP_LIGHT) 			change_app(APP_FLICKER);			//clicking the button switching LIGHT->FLIKER
+	if 			(G_app_runned == APP_FLICKER_SIMPLE) 	change_app(APP_LIGHT); 						//clicking the button switching FLIKER_SIMPLE->LIGHT
+	else if (G_app_runned == APP_LIGHT) 					change_app(APP_FLICKER_GOST);			//clicking the button switching LIGHT->FLIKER_GOST
+	else if (G_app_runned == APP_FLICKER_GOST) 		change_app(APP_FLICKER_SIMPLE);		//clicking the button switching FLIKER_GOST->FLICKER_SIMPLE
 
-	else if (G_app_runned == APP_BOOT) 				change_app(APP_FLICKER);			//clicking the button will skip the screen and calibration
-	else if (G_app_runned == APP_CAL_HELP) 		change_app(APP_CAL_MEASURE); 	//clicking the button starts the calibration(APP_CAL_MEASURE, cal_measure_screen_render)
-	else if (G_app_runned == APP_SHUTDOWN) 		change_app(APP_BOOT); 				//simulate rebooting
-	else 																			change_app(APP_SHUTDOWN); 		//strange behavior, fall down paws upwards
+	else if (G_app_runned == APP_BOOT) 						change_app(APP_FLICKER_SIMPLE);		//clicking the button will skip the screen and calibration
+	else if (G_app_runned == APP_CAL_HELP) 				change_app(APP_CAL_MEASURE); 			//clicking the button starts the calibration(APP_CAL_MEASURE, cal_measure_screen_render)
+	else if (G_app_runned == APP_SHUTDOWN) 				change_app(APP_BOOT); 						//simulate rebooting
+	else 																					change_app(APP_SHUTDOWN); 				//strange behavior, fall down paws upwards
 	free_mem_calc();
 }
 
@@ -622,11 +668,12 @@ void button_holded_handler() {
   Serial.print(F("Holded\n"));
 	term_post_command();
 
-	if 			(G_app_runned == APP_FLICKER) 		change_app(APP_SHUTDOWN); 		//power off
-	else if (G_app_runned == APP_LIGHT) 			change_app(APP_SHUTDOWN);			//power off
-	else if (G_app_runned == APP_CAL_HELP) 		change_app(APP_FLICKER); 			//holding the button skips the calibration
-	else if (G_app_runned == APP_CAL_MEASURE) change_app(APP_FLICKER); 			//holding the button skips the calibration
-	else 																			change_app(APP_SHUTDOWN); 		//strange behavior, fall down paws upwards
+	if 			(G_app_runned == APP_FLICKER_GOST) 		change_app(APP_SHUTDOWN); 				//power off
+	else if (G_app_runned == APP_FLICKER_SIMPLE) 	change_app(APP_SHUTDOWN);					//power off
+	else if (G_app_runned == APP_LIGHT) 					change_app(APP_SHUTDOWN);					//power off
+	else if (G_app_runned == APP_CAL_HELP) 				change_app(APP_FLICKER_SIMPLE); 	//holding the button skips the calibration
+	else if (G_app_runned == APP_CAL_MEASURE) 		change_app(APP_FLICKER_SIMPLE); 	//holding the button skips the calibration
+	else 																					change_app(APP_SHUTDOWN); 				//strange behavior, fall down paws upwards
 
 	free_mem_calc();
 }
@@ -653,9 +700,19 @@ void boot_screen_render() {
 		framebuffer.display();
 	}
 	else {
+		G_adc_correction = 0;
+		G_flicker_gost = 0;
+		G_flicker_simple = 0;
+		G_flicker_freq = 0;
+		G_adc_values_max = 1;
+		G_adc_values_min = MAX_ADC_VALUE;
+		G_boot_run_counter = 0;
+		G_cal_run_counter = 0;
+		G_cal_help_counter = 0;
+		G_cal_help_text_y = 100;
+		G_lum = 0;
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
 		change_app(APP_CAL_HELP);
-		G_boot_run_counter = 0;
 	}
 
 	free_mem_calc();
@@ -718,7 +775,7 @@ void cal_measure_screen_render() {
 	}
 	else {
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		change_app(APP_FLICKER);
+		change_app(APP_FLICKER_SIMPLE);
 		G_cal_run_counter = 0;
 	}
 
@@ -747,14 +804,16 @@ void debug() {
 }
 
 void data_print() {
-	Serial.print(F("\nFlicker freq: "));
-  Serial.print(G_flicker_freq);
-	Serial.print(F(" Hz, flicker (simple): "));
-	Serial.print(G_flicker_simple);
-	Serial.print(F(" %, flicker (gost): "));
-	Serial.print(G_flicker_gost);
-	//Serial.print(F(" %, flicker (gost): "));
 	Serial.print("\n");
+	Serial.println((String)F("Flicker freq: \t\t")+G_flicker_freq+F(" Hz"));
+	Serial.println((String)F("Flicker (simple): \t")+G_flicker_simple+F(" %"));
+	Serial.println((String)F("Flicker (gost): \t")+G_flicker_gost+F(" %"));
+	Serial.println((String)F("ADC calibration: \t")+G_adc_correction+F(" adc points"));
+	Serial.println((String)F("ADC values max: \t")+G_adc_values_max+F(" adc points"));
+	Serial.println((String)F("ADC values min: \t")+G_adc_values_min+F(" adc points"));
+	Serial.println((String)F("Luminance: \t\t")+G_lum+F(" lx"));
+	Serial.println((String)F("App running: \t\tenum APP #")+G_app_runned+F(""));
+	free_mem_calc();
 }
 
 void memory_print() {
