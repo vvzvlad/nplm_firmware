@@ -350,11 +350,11 @@ void measure_light() {
 	lum_values_buf.write(lum_value);
 
 	for (int j = 0; j < 50; j++) {
-		if (lum_values_buf.read(j) > max_lum_value) max_lum_value = lum_values_buf.read(j)
-		if (lum_values_buf.read(j) < min_lum_value) min_lum_value = lum_values_buf.read(j)
+		if (lum_values_buf.read(j) > max_lum_value) max_lum_value = lum_values_buf.read(j);
+		if (lum_values_buf.read(j) < min_lum_value) min_lum_value = lum_values_buf.read(j);
 	}
 
-	graph_lum_value = (lum_value-(min_lum_value/2))/(max_lum_value/GRAPH_HEIGHT);
+	graph_lum_value = log2(1.3) / log2(lum_value);
 	lum_graph_buf.write(graph_lum_value);
 
 
@@ -817,6 +817,7 @@ void shutdown_screen_render() {
 
 
 //----------System functions----------//
+
 
 
 void draw_asset(const asset_t *asset, uint8_t x, uint8_t y) {
