@@ -98,7 +98,6 @@ volatile uint8_t G_cal_run_counter = 0;
 volatile uint8_t G_cal_help_counter = 0;
 volatile uint8_t G_cal_help_text_y = 100;
 
-GyverLBUF<uint16_t, 50> lum_values_buf;
 GyverLBUF<uint8_t, 128> lum_graph_buf;
 
 volatile uint16_t G_lum = 0;
@@ -342,21 +341,12 @@ void measure_flicker() {
 
 
 void measure_light() {
-	uint16_t max_lum_value = 0;
-	uint16_t min_lum_value = 1000*1000*1000;
 	uint8_t graph_lum_value;
   uint16_t lum_value = LightSensor.GetLightIntensity();
 	G_lum = lum_lum_filter.filtered(lum_value);
-	lum_values_buf.write(lum_value);
 
-	for (int j = 0; j < 50; j++) {
-		if (lum_values_buf.read(j) > max_lum_value) max_lum_value = lum_values_buf.read(j);
-		if (lum_values_buf.read(j) < min_lum_value) min_lum_value = lum_values_buf.read(j);
-	}
-
-	graph_lum_value = log2(1.3) / log2(lum_value);
+	graph_lum_value = (uint8_t)log2(lum_value)/log2(1.24);
 	lum_graph_buf.write(graph_lum_value);
-
 
 	free_mem_calc();
 }
@@ -527,6 +517,10 @@ void render_light_screen() {
 	//Normal cleaning of the graph part
 	framebuffer.fillRoundRect(GRAPH_X, GRAPH_Y, GRAPH_WIDTH, GRAPH_Y+GRAPH_HEIGHT, 0, ST7735_TFT_BLACK);
 	for (uint8_t current_colon = GRAPH_X; current_colon < GRAPH_WIDTH; current_colon++) {
+		if 			(lum_graph_buf.read(current_colon) <= 20) score_color = ST7735_TFT_RED;
+		else if (lum_graph_buf.read(current_colon) <= 30) score_color = ST7735_TFT_YELLOW;
+		else 																						 	score_color = ST7735_TFT_GREEN;
+
 		if (current_colon == 0) {
 			framebuffer.drawPixel(current_colon, //The first point is drawn as a pixel because it has no past point
 										ST7735_TFT_HEIGHT-lum_graph_buf.read(current_colon),
