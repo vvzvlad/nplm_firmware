@@ -41,6 +41,7 @@
 #define ST7735_TFT_LIGHT_RED 		0xfaeb
 #define ST7735_TFT_GREEN 				0x07E0
 #define ST7735_TFT_DARK_GREEN 	0x0220
+#define ST7735_TFT_DARK_GREEN2 	0x0160
 #define ST7735_TFT_GRAY 				0x8c71
 #define ST7735_TFT_CYAN 				0x07FF
 #define ST7735_TFT_MAGENTA 			0xF81F
@@ -346,7 +347,8 @@ void measure_light() {
   uint16_t lum_value = LightSensor.GetLightIntensity();
 	G_luminance = lum_lum_filter.filtered(lum_value);
 
-	graph_lum_value = (uint8_t)(log2(lum_value)/log2(1.24));
+	if (lum_value < 2) 			graph_lum_value = 1;
+	else 										graph_lum_value = (uint8_t)(log2(lum_value)/log2(1.24));
 	lum_graph_buf_log.write(graph_lum_value);
 
 	free_mem_calc();
@@ -531,16 +533,34 @@ void render_light_screen() {
 	framebuffer.fillRoundRect(GRAPH_X, GRAPH_Y, GRAPH_WIDTH, GRAPH_Y+GRAPH_HEIGHT, 0, ST7735_TFT_BLACK);
 
 
+	//Drawing vertical lines
+	uint8_t vertical_lines[8] = { 5, 5+(16*1), 5+(16*2), 5+(16*3), 5+(16*4), 5+(16*5), 5+(16*6), 5+(16*7)};
+	for (uint8_t i=0; i<8; i++) {
+		framebuffer.drawLine(vertical_lines[i],
+												ST7735_TFT_HEIGHT-GRAPH_HEIGHT,
+												vertical_lines[i],
+												ST7735_TFT_HEIGHT,
+												ST7735_TFT_DARK_GREEN2);
+	}
+
+	//Drawing horizontal logarithmic lines
+	framebuffer.drawLine(GRAPH_X, ST7735_TFT_HEIGHT, ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT, ST7735_TFT_DARK_GREEN2);
+	for (uint8_t x=2; x<GRAPH_HEIGHT; x = x*2) {
+		framebuffer.drawLine(GRAPH_X,
+													ST7735_TFT_HEIGHT-(x),
+													ST7735_TFT_WIDTH,
+													ST7735_TFT_HEIGHT-(x),
+													ST7735_TFT_DARK_GREEN2);
+	}
+	framebuffer.drawLine(GRAPH_X, ST7735_TFT_HEIGHT-(GRAPH_HEIGHT), ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT-(GRAPH_HEIGHT), ST7735_TFT_DARK_GREEN2);
+
+
+	//Drawing the graph
 	for (uint8_t current_colon = GRAPH_X; current_colon < GRAPH_WIDTH; current_colon++) {
 		uint16_t graph_color;
 		if 			(lum_graph_buf_log.read(current_colon) <= (uint8_t)(log2(200)/log2(1.24)))		graph_color = ST7735_TFT_RED;
 		else if (lum_graph_buf_log.read(current_colon) <= (uint8_t)(log2(300)/log2(1.24)))		graph_color = ST7735_TFT_YELLOW;
 		else 																																									graph_color = ST7735_TFT_GREEN;
-
-
-
-		//Serial.print((String)__LINE__+": "+lum_graph_buf_log.read(current_colon)+"\n");
-
 
 		if (current_colon == 0) {
 			framebuffer.drawPixel(current_colon, //The first point is drawn as a pixel because it has no past point
@@ -697,6 +717,27 @@ void render_flicker_screen() {
   //  }
   //} //YYght, bad idea, but it's a pity to delete the written code
 
+	//Drawing vertical lines
+	uint8_t vertical_lines[8] = { 5, 5+(16*1), 5+(16*2), 5+(16*3), 5+(16*4), 5+(16*5), 5+(16*6), 5+(16*7)};
+	for (uint8_t i=0; i<8; i++) {
+		framebuffer.drawLine(vertical_lines[i],
+												ST7735_TFT_HEIGHT-GRAPH_HEIGHT,
+												vertical_lines[i],
+												ST7735_TFT_HEIGHT,
+												ST7735_TFT_DARK_GREEN2);
+	}
+
+	//Drawing horizontal lines
+
+	for (uint8_t x=0; x<=GRAPH_HEIGHT; x = x + 10) {
+		framebuffer.drawLine(GRAPH_X,
+													ST7735_TFT_HEIGHT-(x),
+													ST7735_TFT_WIDTH,
+													ST7735_TFT_HEIGHT-(x),
+													ST7735_TFT_DARK_GREEN2);
+	}
+
+	//Drawing the graph
 	for (uint8_t current_colon = GRAPH_X; current_colon < GRAPH_WIDTH; current_colon++) {
 		if (current_colon == 0) {
 			framebuffer.drawPixel(current_colon, //The first point is drawn as a pixel because it has no past point
