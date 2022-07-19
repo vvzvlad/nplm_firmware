@@ -98,6 +98,7 @@ volatile uint8_t G_cal_run_counter = 0;
 volatile uint8_t G_cal_help_counter = 0;
 volatile uint8_t G_cal_help_text_y = 100;
 
+GyverLBUF<uint16_t, 50> lum_values_buf;
 GyverLBUF<uint8_t, 128> lum_graph_buf;
 
 volatile uint16_t G_lum = 0;
@@ -110,14 +111,7 @@ volatile FLAG G_flag_first_run = FLAG_ACTIVE;
 volatile APPS G_app_runned = APP_UNKNOWN;
 volatile FLIKER_TYPE_CALC G_F_type = FT_SIMPLE;
 
-void draw_asset(const asset_t *asset, uint8_t x, uint8_t y) {
-  uint8_t h = pgm_read_byte(&asset->height);
-	uint8_t w = pgm_read_byte(&asset->width);
-	framebuffer.drawRGBBitmap(x, y, asset->image, w, h);
-	free_mem_calc();
-}
-
-
+//----------Measure and calc functions----------//
 
 uint16_t get_adc_correction_value() {
 	uint32_t adc_values_sum = 0;
@@ -126,13 +120,358 @@ uint16_t get_adc_correction_value() {
 		adc_values_sum = adc_values_sum + system_adc_read();
 	}
 	uint16_t correction_value = adc_values_sum/CORRECTION_NUM_SAMPLES;
-	//Serial.print("Correction:");
-	//Serial.print(correction_value);
-	//Serial.print("\n\n");
 
 	free_mem_calc();
 	return correction_value;
 }
+
+
+
+uint16_t calc_frequency(uint16_t *adc_values_array, uint16_t adc_values_min_max_mean, uint32_t catch_time_us) {
+	uint16_t adc_mean_values[MEASURE_NUM_SAMPLES] = {};
+	uint16_t adc_mean_values_i = 0;
+
+	uint16_t acc=0;
+	FLAG not_found_flag = FLAG_INACTIVE;
+
+	while(not_found_flag == FLAG_INACTIVE) {
+		not_found_flag=FLAG_ACTIVE;
+		for (uint16_t i=acc; i<MEASURE_NUM_SAMPLES; i++) {
+			if (adc_values_array[i] > adc_values_min_max_mean)
+			{
+				//Serial.println((String)"i:"+i+", adc_values_array:"+adc_values_array[i]);
+				//framebuffer.drawLine(i/GRAPH_WIDTH_DIVIDER, 110, i/GRAPH_WIDTH_DIVIDER, 160, ST7735_TFT_CYAN);
+				//framebuffer.display();
+				acc = i+20;
+				not_found_flag = FLAG_INACTIVE;
+				break;
+			}
+		}
+
+		for (uint16_t i=acc; i<MEASURE_NUM_SAMPLES; i++) {
+			if (not_found_flag == FLAG_ACTIVE) break;
+			else not_found_flag == FLAG_ACTIVE;
+
+			if (adc_values_array[i] < adc_values_min_max_mean)
+			{
+				//framebuffer.drawLine(i/GRAPH_WIDTH_DIVIDER, 110, i/GRAPH_WIDTH_DIVIDER, 160, ST7735_TFT_CYAN);
+				//Serial.println((String)"i:"+i+", adc_values_array:"+adc_values_array[i]);
+				//framebuffer.display();
+				adc_mean_values[adc_mean_values_i] = i;
+				adc_mean_values_i++;
+				acc = i+20;
+				not_found_flag = FLAG_INACTIVE;
+				break;
+			}
+		}
+	}
+
+	uint16_t adc_mean_values_distances_sum = 0;
+	float adc_mean_values_distances_mean = 0;
+	uint8_t adc_mean_values_distances_i = 0;
+
+	for (uint16_t i=1; i<MEASURE_NUM_SAMPLES; i++) {
+		if (adc_mean_values[i] != 0) {
+			adc_mean_values_distances_sum = adc_mean_values_distances_sum + adc_mean_values[i]-adc_mean_values[i-1];
+			adc_mean_values_distances_i++;
+		}
+		else {
+			if (adc_mean_values_distances_i != 0) {
+				adc_mean_values_distances_mean = (float)adc_mean_values_distances_sum/(float)adc_mean_values_distances_i;
+			}
+			else {
+				adc_mean_values_distances_mean = 0;
+			}
+		};
+	}
+
+	uint16_t sample_time_us = catch_time_us/MEASURE_NUM_SAMPLES;
+	uint16_t period_time_us = sample_time_us*adc_mean_values_distances_mean;
+	float freq = (float)1000000/period_time_us;
+
+	if (freq > 2000) freq = 0;
+
+	//Serial.print("period_time_us:");
+	//Serial.print(period_time_us);
+
+	//Debug output for frequency counting
+	//Serial.print("adc_mean_values:\n");
+	//for (uint16_t i=0; i<50; i++) {
+	//	Serial.print(adc_mean_values[i]);
+	//	Serial.print("NN");
+	//}
+	//Serial.print("\n");
+
+	free_mem_calc();
+	return (uint16_t)freq;
+}
+
+void measure_flicker() {
+	uint16_t adc_values[MEASURE_NUM_SAMPLES] = {};
+	uint16_t adc_values_max = 1; //inital value 1 to prevent division by zero if we get zeros in the measurement (or after applying the correction).
+	uint16_t adc_values_min = MAX_ADC_VALUE;
+	uint16_t adc_values_avg = 0;
+	uint16_t adc_values_min_max_mean = 0;
+	uint32_t adc_values_sum = 0;
+	float flicker_gost = 0;
+	float flicker_simple = 0;
+	uint8_t flicker_gost_uint = 0;
+	uint8_t flicker_simple_uint = 0;
+
+	uint32_t catch_start_time = 0;
+	uint32_t catch_stop_time = 0;
+	uint32_t catch_time_us = 0;
+
+  //Disable everything that can interrupt measurements (interruptions, WIFI)
+	wifi_set_opmode(NULL_MODE);
+	system_soft_wdt_stop();
+	ESP.wdtDisable();
+	ets_intr_lock( ); //close interrupt
+	noInterrupts();
+
+	// Synchronization of measurements with the waveform to prevent graph drift
+	for (uint16_t i=0; i<SYNC_NUM_SAMPLES; i++) { adc_values_sum = adc_values_sum + system_adc_read(); }
+	adc_values_avg = adc_values_sum/SYNC_NUM_SAMPLES;
+
+	for (uint16_t i=0; i<SYNC_NUM_SAMPLES; i++) { if (system_adc_read() > adc_values_avg) break; }
+	for (uint16_t i=0; i<SYNC_NUM_SAMPLES; i++) { if (system_adc_read() < adc_values_avg) break; }
+	adc_values_sum = 0;
+	//The next measurement will occur in the middle of the wave
+
+	//The measurement itself
+	catch_start_time = micros();
+	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
+		adc_values[i] = system_adc_read();
+	}
+	catch_stop_time = micros();
+	catch_time_us = catch_stop_time-catch_start_time;
+	//End of measurement
+
+	//Allow interrupts back
+	interrupts();
+	ets_intr_unlock(); //open interrupt
+	system_soft_wdt_restart();
+
+	//Debug output of the measurement buffer
+	//Serial.print("adc_values:\n");
+	//for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
+	//	Serial.print(adc_values[i]);
+	//	Serial.print("NN");
+	//}
+	//Serial.print("\n");
+
+	//Applying Correction
+	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
+		if 		(adc_values[i] <= G_adc_correction) { adc_values[i] = 0;  }
+		else 																			{ adc_values[i] = adc_values[i] - G_adc_correction; }
+	}
+
+	//Calculating the maximum, minimum, average, average between the maximum and minimum values (for frequency measure)
+	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
+		if (adc_values[i] > adc_values_max) {adc_values_max = adc_values[i];}
+		if (adc_values[i] < adc_values_min) {adc_values_min = adc_values[i];}
+		adc_values_sum = adc_values_sum + adc_values[i];
+	}
+	adc_values_avg = adc_values_sum/MEASURE_NUM_SAMPLES;
+	adc_values_min_max_mean = (adc_values_max-adc_values_min)/2+adc_values_min;
+
+	//Serial.print("adc_values_min_max_mean:");
+	//Serial.print(adc_values_min_max_mean);
+	//Serial.print("\n");
+
+	//Flicker level calculation
+	flicker_gost = ((float)adc_values_max-(float)adc_values_min)*100/(2*(float)adc_values_avg);
+	flicker_simple = ((float)adc_values_max-(float)adc_values_min)*100/((float)adc_values_max+(float)adc_values_min);
+
+	if (flicker_gost > 255) flicker_gost_uint = 255;
+	if (flicker_gost < 0) flicker_gost_uint = 0;
+	if (flicker_gost >= 0 && flicker_gost <= 255) flicker_gost_uint = (uint8_t)flicker_gost;
+
+	if (flicker_simple > 255) flicker_simple_uint = 255;
+	if (flicker_simple < 0) flicker_simple_uint = 0;
+	if (flicker_simple >= 0 && flicker_simple <= 255) flicker_simple_uint = (uint8_t)flicker_simple;
+
+	//flicker_gost_uint = (uint8_t)flicker_gost; //todo удалить
+	//flicker_simple_uint = (uint8_t)flicker_simple;
+
+	//Flicker frequency calculation
+	uint16_t freq = 0;
+	if (flicker_simple > NO_FREQ_FLICKER_VALUE) 	freq = calc_frequency(adc_values, adc_values_min_max_mean, catch_time_us);
+	else																					freq = 0; //At low flicker level the frequency count is wrong and strobes
+
+	G_flicker_gost = flicker_gost_filter.filtered((int)flicker_gost_uint);
+	G_flicker_simple = flicker_simple_filter.filtered((int)flicker_simple_uint);
+
+	G_flicker_freq = flicker_freq_filter.filtered(freq);
+	G_adc_values_max = adc_values_max;
+	G_adc_values_min = adc_values_min;
+
+
+	//Graph data
+	uint8_t adc_values_multiplier = 0;
+
+	adc_values_max = adc_values_max/100*10+adc_values_max;
+	if (adc_values_max == 0) { adc_values_max = 1; };
+	adc_values_multiplier = MAX_ADC_VALUE/adc_values_max;
+
+	for (uint16_t i=0; i < GRAPH_WIDTH; i++) {
+		G_graph_values[i] = (adc_values[i*GRAPH_WIDTH_DIVIDER+0]*adc_values_multiplier+  //Take 4 values (=GRAPH_WIDTH_DIVIDER)
+																	adc_values[i*GRAPH_WIDTH_DIVIDER+1]*adc_values_multiplier+ //from the adc values array at a time
+																	adc_values[i*GRAPH_WIDTH_DIVIDER+2]*adc_values_multiplier+ //and collapse them into one
+																	adc_values[i*GRAPH_WIDTH_DIVIDER+3]*adc_values_multiplier)
+																	/GRAPH_WIDTH_DIVIDER/GRAPH_HEIGHT_DIVIDER;
+		if (G_graph_values[i] > 50) { G_graph_values[i] = 50; }
+	}
+
+
+	//debug prints
+	//Serial.print("Avg:");
+	//Serial.print(adc_values_avg);
+	//Serial.print(", Max:");
+	//Serial.print(adc_values_max);
+	//Serial.print(", min:");
+	//Serial.print(adc_values_min);
+	//Serial.print(", correction:");
+	//Serial.print(G_adc_correction);
+	//Serial.print(", flicker_gost:");
+	//Serial.print(flicker_gost);
+	//Serial.print(", flicker_simple:");
+	//Serial.print(flicker_simple);
+	free_mem_calc();
+}
+
+
+void measure_light() {
+	uint16_t max_lum_value = 0;
+	uint16_t min_lum_value = 1000*1000*1000;
+	uint8_t graph_lum_value;
+  uint16_t lum_value = LightSensor.GetLightIntensity();
+	G_lum = lum_lum_filter.filtered(lum_value);
+	lum_values_buf.write(lum_value);
+
+	for (int j = 0; j < 50; j++) {
+		if (lum_values_buf.read(j) > max_lum_value) max_lum_value = lum_values_buf.read(j)
+		if (lum_values_buf.read(j) < min_lum_value) min_lum_value = lum_values_buf.read(j)
+	}
+
+	graph_lum_value = (lum_value-(min_lum_value/2))/(max_lum_value/GRAPH_HEIGHT);
+	lum_graph_buf.write(graph_lum_value);
+
+
+	free_mem_calc();
+}
+
+
+//----------Switch app function----------//
+
+void change_app(APPS target_app){
+	if (G_app_runned == target_app) {return;}
+
+	if (target_app == APP_FLICKER_SIMPLE || target_app == APP_FLICKER_GOST || target_app == APP_LIGHT) {
+		EEPROM.put(EEPROM_LAST_APP, target_app); EEPROM.commit();
+		if (G_eeprom_last_app != APP_UNKNOWN && G_flag_first_run == FLAG_ACTIVE) {
+			target_app = G_eeprom_last_app;
+			G_flag_first_run = FLAG_INACTIVE;
+		}
+	}
+
+
+	G_app_runned = target_app;
+	ts.disableAll();
+	ts.enable(TS_MEASURE_FLICKER); //To quickly update the values when switching
+	ts.enable(TS_MEASURE_LIGHT);   //applications, the metering processes is always on
+
+	if (target_app == APP_FLICKER_SIMPLE) {
+		G_F_type = FT_SIMPLE;
+		ts.enable(TS_RENDER_FLICKER);
+		framebuffer.fillScreen(ST7735_TFT_BLACK);
+		Serial.print(F("Run APP_FLICKER_SIMPLE app\n")); term_post_command();
+		return;
+	}
+
+	if (target_app == APP_FLICKER_GOST) {
+		G_F_type = FT_GOST;
+		ts.enable(TS_RENDER_FLICKER);
+		framebuffer.fillScreen(ST7735_TFT_BLACK);
+		Serial.print(F("Run APP_FLICKER_GOST app\n")); term_post_command();
+		return;
+	}
+
+	if (target_app == APP_LIGHT) {
+		ts.enable(TS_RENDER_LIGHT);
+		framebuffer.fillScreen(ST7735_TFT_BLACK);
+		Serial.print(F("Run APP_LIGHT app\n")); term_post_command();
+		return;
+	}
+
+	if (target_app == APP_BOOT) {
+		ts.enable(TS_RENDER_BOOT);
+		framebuffer.fillScreen(ST7735_TFT_BLACK);
+		Serial.print(F("Run APP_BOOT app\n")); term_post_command();
+		return;
+	}
+
+	if (target_app == APP_CAL_HELP) {
+		ts.enable(TS_RENDER_CAL_HELP);
+		framebuffer.fillScreen(ST7735_TFT_BLACK);
+		Serial.print(F("Run APP_CAL_HELP app\n")); term_post_command();
+		return;
+	}
+
+	if (target_app == APP_CAL_MEASURE) {
+		ts.enable(TS_RENDER_CAL_PROCESS);
+		framebuffer.fillScreen(ST7735_TFT_BLACK);
+		Serial.print(F("Run APP_CAL_MEASURE app\n")); term_post_command();
+		return;
+	}
+
+	if (target_app == APP_SHUTDOWN) {
+		ts.enable(TS_RENDER_SHUTDOWN);
+		//No clear screen — this application draws the interface on top
+		//of the old app canvas (like is a popup window)
+		Serial.print(F("Run APP_SHUTDOWN app\n")); term_post_command();
+		return;
+	}
+}
+
+//----------Button processing functions----------//
+
+void button_click_handler() { //Switch applications cyclically at the touch of a button
+	Serial.print(F("Click\n"));
+	term_post_command();
+
+	if 			(G_app_runned == APP_FLICKER_SIMPLE) 	change_app(APP_LIGHT); 						//clicking the button switching FLIKER_SIMPLE->LIGHT
+	else if (G_app_runned == APP_LIGHT) 					change_app(APP_FLICKER_GOST);			//clicking the button switching LIGHT->FLIKER_GOST
+	else if (G_app_runned == APP_FLICKER_GOST) 		change_app(APP_FLICKER_SIMPLE);		//clicking the button switching FLIKER_GOST->FLICKER_SIMPLE
+
+	else if (G_app_runned == APP_BOOT) 						change_app(APP_FLICKER_SIMPLE);		//clicking the button will skip the screen and calibration
+	else if (G_app_runned == APP_CAL_HELP) 				change_app(APP_CAL_MEASURE); 			//clicking the button starts the calibration(APP_CAL_MEASURE, cal_measure_screen_render)
+	else if (G_app_runned == APP_SHUTDOWN) 				change_app(APP_BOOT); 						//simulate rebooting
+	else 																					change_app(APP_SHUTDOWN); 				//strange behavior, fall down paws upwards
+	free_mem_calc();
+}
+
+void button_holded_handler() {
+  Serial.print(F("Holded\n"));
+	term_post_command();
+
+	if 			(G_app_runned == APP_FLICKER_GOST) 		change_app(APP_SHUTDOWN); 				//power off
+	else if (G_app_runned == APP_FLICKER_SIMPLE) 	change_app(APP_SHUTDOWN);					//power off
+	else if (G_app_runned == APP_LIGHT) 					change_app(APP_SHUTDOWN);					//power off
+	else if (G_app_runned == APP_CAL_HELP) 				change_app(APP_FLICKER_SIMPLE); 	//holding the button skips the calibration
+	else if (G_app_runned == APP_CAL_MEASURE) 		change_app(APP_FLICKER_SIMPLE); 	//holding the button skips the calibration
+	else 																					change_app(APP_SHUTDOWN); 				//strange behavior, fall down paws upwards
+
+	free_mem_calc();
+}
+
+void button_hold_handler() { //A long press to turn device off
+  //Serial.print(F("Hold\n"));
+	//term_post_command();
+	free_mem_calc();
+}
+
+//----------Screens render functions----------//
 
 
 void render_light_screen() {
@@ -141,8 +480,6 @@ void render_light_screen() {
 
 	framebuffer.setTextColor(ST7735_TFT_WHITE);
 	framebuffer.fillRoundRect(0, 0, ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT-GRAPH_HEIGHT, 0, ST7735_TFT_BLACK); //Clearing only the image above the graph!
-
-	lum_graph_buf.write(lum);
 
 	//Drawing the labels "good lamp", "bad lamp", "normal lamp"
 	if (lum >= 0 && lum <= 200) 	draw_asset(&flicker_msg_too_low_lum, 0, 0); //TODO временно!
@@ -378,335 +715,6 @@ void render_flicker_screen() {
 	free_mem_calc();
 }
 
-
-
-
-uint16_t calc_frequency(uint16_t *adc_values_array, uint16_t adc_values_min_max_mean, uint32_t catch_time_us) {
-	uint16_t adc_mean_values[MEASURE_NUM_SAMPLES] = {};
-	uint16_t adc_mean_values_i = 0;
-
-	uint16_t acc=0;
-	FLAG not_found_flag = FLAG_INACTIVE;
-
-	while(not_found_flag == FLAG_INACTIVE) {
-		not_found_flag=FLAG_ACTIVE;
-		for (uint16_t i=acc; i<MEASURE_NUM_SAMPLES; i++) {
-			if (adc_values_array[i] > adc_values_min_max_mean)
-			{
-				//Serial.println((String)"i:"+i+", adc_values_array:"+adc_values_array[i]);
-				//framebuffer.drawLine(i/GRAPH_WIDTH_DIVIDER, 110, i/GRAPH_WIDTH_DIVIDER, 160, ST7735_TFT_CYAN);
-				//framebuffer.display();
-				acc = i+20;
-				not_found_flag = FLAG_INACTIVE;
-				break;
-			}
-		}
-
-		for (uint16_t i=acc; i<MEASURE_NUM_SAMPLES; i++) {
-			if (not_found_flag == FLAG_ACTIVE) break;
-			else not_found_flag == FLAG_ACTIVE;
-
-			if (adc_values_array[i] < adc_values_min_max_mean)
-			{
-				//framebuffer.drawLine(i/GRAPH_WIDTH_DIVIDER, 110, i/GRAPH_WIDTH_DIVIDER, 160, ST7735_TFT_CYAN);
-				//Serial.println((String)"i:"+i+", adc_values_array:"+adc_values_array[i]);
-				//framebuffer.display();
-				adc_mean_values[adc_mean_values_i] = i;
-				adc_mean_values_i++;
-				acc = i+20;
-				not_found_flag = FLAG_INACTIVE;
-				break;
-			}
-		}
-	}
-
-	uint16_t adc_mean_values_distances_sum = 0;
-	float adc_mean_values_distances_mean = 0;
-	uint8_t adc_mean_values_distances_i = 0;
-
-	for (uint16_t i=1; i<MEASURE_NUM_SAMPLES; i++) {
-		if (adc_mean_values[i] != 0) {
-			adc_mean_values_distances_sum = adc_mean_values_distances_sum + adc_mean_values[i]-adc_mean_values[i-1];
-			adc_mean_values_distances_i++;
-		}
-		else {
-			if (adc_mean_values_distances_i != 0) {
-				adc_mean_values_distances_mean = (float)adc_mean_values_distances_sum/(float)adc_mean_values_distances_i;
-			}
-			else {
-				adc_mean_values_distances_mean = 0;
-			}
-		};
-	}
-
-	uint16_t sample_time_us = catch_time_us/MEASURE_NUM_SAMPLES;
-	uint16_t period_time_us = sample_time_us*adc_mean_values_distances_mean;
-	float freq = (float)1000000/period_time_us;
-
-	if (freq > 2000) freq = 0;
-
-	//Serial.print("period_time_us:");
-	//Serial.print(period_time_us);
-
-	//Debug output for frequency counting
-	//Serial.print("adc_mean_values:\n");
-	//for (uint16_t i=0; i<50; i++) {
-	//	Serial.print(adc_mean_values[i]);
-	//	Serial.print("NN");
-	//}
-	//Serial.print("\n");
-
-	free_mem_calc();
-	return (uint16_t)freq;
-}
-
-void measure_flicker() {
-	uint16_t adc_values[MEASURE_NUM_SAMPLES] = {};
-	uint16_t adc_values_max = 1; //inital value 1 to prevent division by zero if we get zeros in the measurement (or after applying the correction).
-	uint16_t adc_values_min = MAX_ADC_VALUE;
-	uint16_t adc_values_avg = 0;
-	uint16_t adc_values_min_max_mean = 0;
-	uint32_t adc_values_sum = 0;
-	float flicker_gost = 0;
-	float flicker_simple = 0;
-	uint8_t flicker_gost_uint = 0;
-	uint8_t flicker_simple_uint = 0;
-
-	uint32_t catch_start_time = 0;
-	uint32_t catch_stop_time = 0;
-	uint32_t catch_time_us = 0;
-
-  //Disable everything that can interrupt measurements (interruptions, WIFI)
-	wifi_set_opmode(NULL_MODE);
-	system_soft_wdt_stop();
-	ESP.wdtDisable();
-	ets_intr_lock( ); //close interrupt
-	noInterrupts();
-
-	// Synchronization of measurements with the waveform to prevent graph drift
-	for (uint16_t i=0; i<SYNC_NUM_SAMPLES; i++) { adc_values_sum = adc_values_sum + system_adc_read(); }
-	adc_values_avg = adc_values_sum/SYNC_NUM_SAMPLES;
-
-	for (uint16_t i=0; i<SYNC_NUM_SAMPLES; i++) { if (system_adc_read() > adc_values_avg) break; }
-	for (uint16_t i=0; i<SYNC_NUM_SAMPLES; i++) { if (system_adc_read() < adc_values_avg) break; }
-	adc_values_sum = 0;
-	//The next measurement will occur in the middle of the wave
-
-	//The measurement itself
-	catch_start_time = micros();
-	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-		adc_values[i] = system_adc_read();
-	}
-	catch_stop_time = micros();
-	catch_time_us = catch_stop_time-catch_start_time;
-	//End of measurement
-
-	//Allow interrupts back
-	interrupts();
-	ets_intr_unlock(); //open interrupt
-	system_soft_wdt_restart();
-
-	//Debug output of the measurement buffer
-	//Serial.print("adc_values:\n");
-	//for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-	//	Serial.print(adc_values[i]);
-	//	Serial.print("NN");
-	//}
-	//Serial.print("\n");
-
-	//Applying Correction
-	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-		if 		(adc_values[i] <= G_adc_correction) { adc_values[i] = 0;  }
-		else 																			{ adc_values[i] = adc_values[i] - G_adc_correction; }
-	}
-
-	//Calculating the maximum, minimum, average, average between the maximum and minimum values (for frequency measure)
-	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-		if (adc_values[i] > adc_values_max) {adc_values_max = adc_values[i];}
-		if (adc_values[i] < adc_values_min) {adc_values_min = adc_values[i];}
-		adc_values_sum = adc_values_sum + adc_values[i];
-	}
-	adc_values_avg = adc_values_sum/MEASURE_NUM_SAMPLES;
-	adc_values_min_max_mean = (adc_values_max-adc_values_min)/2+adc_values_min;
-
-	//Serial.print("adc_values_min_max_mean:");
-	//Serial.print(adc_values_min_max_mean);
-	//Serial.print("\n");
-
-	//Flicker level calculation
-	flicker_gost = ((float)adc_values_max-(float)adc_values_min)*100/(2*(float)adc_values_avg);
-	flicker_simple = ((float)adc_values_max-(float)adc_values_min)*100/((float)adc_values_max+(float)adc_values_min);
-
-	if (flicker_gost > 255) flicker_gost_uint = 255;
-	if (flicker_gost < 0) flicker_gost_uint = 0;
-	if (flicker_gost >= 0 && flicker_gost <= 255) flicker_gost_uint = (uint8_t)flicker_gost;
-
-	if (flicker_simple > 255) flicker_simple_uint = 255;
-	if (flicker_simple < 0) flicker_simple_uint = 0;
-	if (flicker_simple >= 0 && flicker_simple <= 255) flicker_simple_uint = (uint8_t)flicker_simple;
-
-	//flicker_gost_uint = (uint8_t)flicker_gost; //todo удалить
-	//flicker_simple_uint = (uint8_t)flicker_simple;
-
-	//Flicker frequency calculation
-	uint16_t freq = 0;
-	if (flicker_simple > NO_FREQ_FLICKER_VALUE) 	freq = calc_frequency(adc_values, adc_values_min_max_mean, catch_time_us);
-	else																					freq = 0; //At low flicker level the frequency count is wrong and strobes
-
-	G_flicker_gost = flicker_gost_filter.filtered((int)flicker_gost_uint);
-	G_flicker_simple = flicker_simple_filter.filtered((int)flicker_simple_uint);
-
-	G_flicker_freq = flicker_freq_filter.filtered(freq);
-	G_adc_values_max = adc_values_max;
-	G_adc_values_min = adc_values_min;
-
-
-	//Graph data
-	uint8_t adc_values_multiplier = 0;
-
-	adc_values_max = adc_values_max/100*10+adc_values_max;
-	if (adc_values_max == 0) { adc_values_max = 1; };
-	adc_values_multiplier = MAX_ADC_VALUE/adc_values_max;
-
-	for (uint16_t i=0; i < GRAPH_WIDTH; i++) {
-		G_graph_values[i] = (adc_values[i*GRAPH_WIDTH_DIVIDER+0]*adc_values_multiplier+  //Take 4 values (=GRAPH_WIDTH_DIVIDER)
-																	adc_values[i*GRAPH_WIDTH_DIVIDER+1]*adc_values_multiplier+ //from the adc values array at a time
-																	adc_values[i*GRAPH_WIDTH_DIVIDER+2]*adc_values_multiplier+ //and collapse them into one
-																	adc_values[i*GRAPH_WIDTH_DIVIDER+3]*adc_values_multiplier)
-																	/GRAPH_WIDTH_DIVIDER/GRAPH_HEIGHT_DIVIDER;
-		if (G_graph_values[i] > 50) { G_graph_values[i] = 50; }
-	}
-
-
-	//debug prints
-	//Serial.print("Avg:");
-	//Serial.print(adc_values_avg);
-	//Serial.print(", Max:");
-	//Serial.print(adc_values_max);
-	//Serial.print(", min:");
-	//Serial.print(adc_values_min);
-	//Serial.print(", correction:");
-	//Serial.print(G_adc_correction);
-	//Serial.print(", flicker_gost:");
-	//Serial.print(flicker_gost);
-	//Serial.print(", flicker_simple:");
-	//Serial.print(flicker_simple);
-	free_mem_calc();
-}
-
-
-void measure_light() {
-  uint16_t lum = LightSensor.GetLightIntensity();
-	G_lum = lum_lum_filter.filtered(lum);
-	free_mem_calc();
-}
-
-
-void change_app(APPS target_app){
-	if (G_app_runned == target_app) {return;}
-
-	if (target_app == APP_FLICKER_SIMPLE || target_app == APP_FLICKER_GOST || target_app == APP_LIGHT) {
-		EEPROM.put(EEPROM_LAST_APP, target_app); EEPROM.commit();
-		if (G_eeprom_last_app != APP_UNKNOWN && G_flag_first_run == FLAG_ACTIVE) {
-			target_app = G_eeprom_last_app;
-			G_flag_first_run = FLAG_INACTIVE;
-		}
-	}
-
-
-	G_app_runned = target_app;
-	ts.disableAll();
-	ts.enable(TS_MEASURE_FLICKER); //To quickly update the values when switching
-	ts.enable(TS_MEASURE_LIGHT);   //applications, the metering processes is always on
-
-	if (target_app == APP_FLICKER_SIMPLE) {
-		G_F_type = FT_SIMPLE;
-		ts.enable(TS_RENDER_FLICKER);
-		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		Serial.print(F("Run APP_FLICKER_SIMPLE app\n")); term_post_command();
-		return;
-	}
-
-	if (target_app == APP_FLICKER_GOST) {
-		G_F_type = FT_GOST;
-		ts.enable(TS_RENDER_FLICKER);
-		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		Serial.print(F("Run APP_FLICKER_GOST app\n")); term_post_command();
-		return;
-	}
-
-	if (target_app == APP_LIGHT) {
-		ts.enable(TS_RENDER_LIGHT);
-		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		Serial.print(F("Run APP_LIGHT app\n")); term_post_command();
-		return;
-	}
-
-	if (target_app == APP_BOOT) {
-		ts.enable(TS_RENDER_BOOT);
-		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		Serial.print(F("Run APP_BOOT app\n")); term_post_command();
-		return;
-	}
-
-	if (target_app == APP_CAL_HELP) {
-		ts.enable(TS_RENDER_CAL_HELP);
-		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		Serial.print(F("Run APP_CAL_HELP app\n")); term_post_command();
-		return;
-	}
-
-	if (target_app == APP_CAL_MEASURE) {
-		ts.enable(TS_RENDER_CAL_PROCESS);
-		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		Serial.print(F("Run APP_CAL_MEASURE app\n")); term_post_command();
-		return;
-	}
-
-	if (target_app == APP_SHUTDOWN) {
-		ts.enable(TS_RENDER_SHUTDOWN);
-		//No clear screen — this application draws the interface on top
-		//of the old app canvas (like is a popup window)
-		Serial.print(F("Run APP_SHUTDOWN app\n")); term_post_command();
-		return;
-	}
-}
-
-void button_click_handler() { //Switch applications cyclically at the touch of a button
-	Serial.print(F("Click\n"));
-	term_post_command();
-
-	if 			(G_app_runned == APP_FLICKER_SIMPLE) 	change_app(APP_LIGHT); 						//clicking the button switching FLIKER_SIMPLE->LIGHT
-	else if (G_app_runned == APP_LIGHT) 					change_app(APP_FLICKER_GOST);			//clicking the button switching LIGHT->FLIKER_GOST
-	else if (G_app_runned == APP_FLICKER_GOST) 		change_app(APP_FLICKER_SIMPLE);		//clicking the button switching FLIKER_GOST->FLICKER_SIMPLE
-
-	else if (G_app_runned == APP_BOOT) 						change_app(APP_FLICKER_SIMPLE);		//clicking the button will skip the screen and calibration
-	else if (G_app_runned == APP_CAL_HELP) 				change_app(APP_CAL_MEASURE); 			//clicking the button starts the calibration(APP_CAL_MEASURE, cal_measure_screen_render)
-	else if (G_app_runned == APP_SHUTDOWN) 				change_app(APP_BOOT); 						//simulate rebooting
-	else 																					change_app(APP_SHUTDOWN); 				//strange behavior, fall down paws upwards
-	free_mem_calc();
-}
-
-void button_holded_handler() {
-  Serial.print(F("Holded\n"));
-	term_post_command();
-
-	if 			(G_app_runned == APP_FLICKER_GOST) 		change_app(APP_SHUTDOWN); 				//power off
-	else if (G_app_runned == APP_FLICKER_SIMPLE) 	change_app(APP_SHUTDOWN);					//power off
-	else if (G_app_runned == APP_LIGHT) 					change_app(APP_SHUTDOWN);					//power off
-	else if (G_app_runned == APP_CAL_HELP) 				change_app(APP_FLICKER_SIMPLE); 	//holding the button skips the calibration
-	else if (G_app_runned == APP_CAL_MEASURE) 		change_app(APP_FLICKER_SIMPLE); 	//holding the button skips the calibration
-	else 																					change_app(APP_SHUTDOWN); 				//strange behavior, fall down paws upwards
-
-	free_mem_calc();
-}
-
-void button_hold_handler() { //A long press to turn device off
-  //Serial.print(F("Hold\n"));
-	//term_post_command();
-	free_mem_calc();
-}
-
 void boot_screen_render() {
 	uint8_t counter = G_boot_run_counter++; //local counter value before increment
 
@@ -723,17 +731,6 @@ void boot_screen_render() {
 		framebuffer.display();
 	}
 	else {
-		G_adc_correction = 0;
-		G_flicker_gost = 0;
-		G_flicker_simple = 0;
-		G_flicker_freq = 0;
-		G_adc_values_max = 1;
-		G_adc_values_min = MAX_ADC_VALUE;
-		G_boot_run_counter = 0;
-		G_cal_run_counter = 0;
-		G_cal_help_counter = 0;
-		G_cal_help_text_y = 100;
-		G_lum = 0;
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
 		change_app(APP_CAL_HELP);
 	}
@@ -805,6 +802,7 @@ void cal_measure_screen_render() {
 	free_mem_calc();
 }
 
+
 void shutdown_screen_render() {
 	framebuffer.fillScreen(ST7735_TFT_BLACK); //Temporarily!
 	framebuffer.setCursor(34, 97);
@@ -816,11 +814,30 @@ void shutdown_screen_render() {
 	free_mem_calc();
 }
 
+
+
+//----------System functions----------//
+
+
+void draw_asset(const asset_t *asset, uint8_t x, uint8_t y) {
+  uint8_t h = pgm_read_byte(&asset->height);
+	uint8_t w = pgm_read_byte(&asset->width);
+	framebuffer.drawRGBBitmap(x, y, asset->image, w, h);
+	free_mem_calc();
+}
+
+
 void free_mem_calc() {
 	uint32_t current_free_mem = system_get_free_heap_size();
 	if (G_min_free_mem > current_free_mem) G_min_free_mem = current_free_mem;
 }
 
+
+void isr() {
+  btn.tickISR();
+}
+
+//----------Terminal functions----------//
 void term_calibration_enable_disable() {
 	char *arg = term.getNext();
 	if (arg != NULL && strcmp(arg, "enable") == 0) {
@@ -921,9 +938,7 @@ void term_post_command() {
   Serial.print(F("> "));
 }
 
-void isr() {
-  btn.tickISR();
-}
+//----------EEPROM functions----------//
 
 void eeprom_init() {
 	uint32_t eeprom_flag = 0xDEADBEEF;
@@ -950,6 +965,11 @@ void eeprom_clear() {
 	Serial.print(F("EEPROM erase complete\n"));
 	term_post_command();
 }
+
+
+
+
+//----------Entry point----------//
 
 void setup(void) {
 	Serial.begin(115200);
