@@ -80,8 +80,9 @@ SerialTerminal term('\n', ' '); //new line character(\n), delimiter character(sp
 
 //Filters
 GMedian<5, uint16_t> flicker_freq_filter;
-GMedian<2, uint16_t> lum_lum_filter;
 GMedian<5, uint16_t> cal_filter;
+GKalman luminance_lx_filter(3, 0.3);
+GKalman luminance_arrow_diff_filter(3, 0.3);
 GKalman flicker_simple_filter(3, 0.3);
 GKalman flicker_gost_filter(3, 0.3);
 GyverLBUF<uint8_t, 6> flicker_accuracy_buf;
@@ -97,6 +98,7 @@ volatile uint8_t G_graph_values[GRAPH_WIDTH] = {};
 volatile uint32_t G_min_free_mem = 1000*1000*1000;
 volatile uint8_t G_boot_run_counter = 0;
 volatile uint8_t G_cal_run_counter = 0;
+volatile uint8_t G_shutdown_run_counter = 0;
 volatile uint8_t G_cal_help_counter = 0;
 volatile uint8_t G_cal_help_text_y = 100;
 
@@ -110,25 +112,28 @@ volatile FLAG G_eeprom_calibration = FLAG_ACTIVE;
 
 volatile FLAG G_flag_first_run = FLAG_ACTIVE;
 volatile APPS G_app_runned = APP_UNKNOWN;
+volatile APPS G_app_previous = APP_UNKNOWN;
+volatile APPS G_last_app_runned = APP_UNKNOWN;
+
 volatile FLIKER_TYPE_CALC G_F_type = FT_SIMPLE;
 
 //----------Measure and calc functions----------//
 
-uint16_t get_adc_correction_value() {
+uint16_t adc_value_measure() {
 	uint32_t adc_values_sum = 0;
 
 	for (uint16_t i=0; i<CORRECTION_NUM_SAMPLES; i++) {
 		adc_values_sum = adc_values_sum + system_adc_read();
 	}
-	uint16_t correction_value = adc_values_sum/CORRECTION_NUM_SAMPLES;
+	uint16_t value = adc_values_sum/CORRECTION_NUM_SAMPLES;
 
 	free_mem_calc();
-	return correction_value;
+	return value;
 }
 
 
 
-uint16_t calc_frequency(uint16_t *adc_values_array, uint16_t adc_values_min_max_mean, uint32_t catch_time_us) {
+uint16_t frequency_calc(uint16_t *adc_values_array, uint16_t adc_values_min_max_mean, uint32_t catch_time_us) {
 	uint16_t adc_mean_values[MEASURE_NUM_SAMPLES] = {};
 	uint16_t adc_mean_values_i = 0;
 
@@ -207,7 +212,7 @@ uint16_t calc_frequency(uint16_t *adc_values_array, uint16_t adc_values_min_max_
 	return (uint16_t)freq;
 }
 
-void measure_flicker() {
+void flicker_measure() {
 	uint16_t adc_values[MEASURE_NUM_SAMPLES] = {};
 	uint16_t adc_values_max = 1; //inital value 1 to prevent division by zero if we get zeros in the measurement (or after applying the correction).
 	uint16_t adc_values_min = MAX_ADC_VALUE;
@@ -297,7 +302,7 @@ void measure_flicker() {
 
 	//Flicker frequency calculation
 	uint16_t freq = 0;
-	if (flicker_simple > NO_FREQ_FLICKER_VALUE) 	freq = calc_frequency(adc_values, adc_values_min_max_mean, catch_time_us);
+	if (flicker_simple > NO_FREQ_FLICKER_VALUE) 	freq = frequency_calc(adc_values, adc_values_min_max_mean, catch_time_us);
 	else																					freq = 0; //At low flicker level the frequency count is wrong and strobes
 
 	G_flicker_gost = flicker_gost_filter.filtered((int)flicker_gost_uint);
@@ -342,10 +347,10 @@ void measure_flicker() {
 }
 
 
-void measure_light() {
+void luminance_measure() {
 	uint8_t graph_lum_value;
   uint16_t lum_value = LightSensor.GetLightIntensity();
-	G_luminance = lum_lum_filter.filtered(lum_value);
+	G_luminance = luminance_lx_filter.filtered(lum_value);
 
 	if (lum_value < 2) 			graph_lum_value = 1;
 	else 										graph_lum_value = (uint8_t)(log2(lum_value)/log2(1.24));
@@ -356,6 +361,7 @@ void measure_light() {
 
 
 //----------Switch app function----------//
+
 
 void change_app(APPS target_app){
 	if (G_app_runned == target_app) {return;}
@@ -368,7 +374,7 @@ void change_app(APPS target_app){
 		}
 	}
 
-
+	G_app_previous = G_app_runned;
 	G_app_runned = target_app;
 	ts.disableAll();
 	ts.enable(TS_MEASURE_FLICKER); //To quickly update the values when switching
@@ -377,52 +383,44 @@ void change_app(APPS target_app){
 	if (target_app == APP_FLICKER_SIMPLE) {
 		G_F_type = FT_SIMPLE;
 		ts.enable(TS_RENDER_FLICKER);
-		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		Serial.print(F("Run APP_FLICKER_SIMPLE app\n")); term_post_command();
+		Serial.print(F("Run APP_FLICKER_SIMPLE app\n")); term_prompt();
 		return;
 	}
 
 	if (target_app == APP_FLICKER_GOST) {
 		G_F_type = FT_GOST;
 		ts.enable(TS_RENDER_FLICKER);
-		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		Serial.print(F("Run APP_FLICKER_GOST app\n")); term_post_command();
+		Serial.print(F("Run APP_FLICKER_GOST app\n")); term_prompt();
 		return;
 	}
 
 	if (target_app == APP_LIGHT) {
 		ts.enable(TS_RENDER_LIGHT);
-		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		Serial.print(F("Run APP_LIGHT app\n")); term_post_command();
+		Serial.print(F("Run APP_LIGHT app\n")); term_prompt();
 		return;
 	}
 
 	if (target_app == APP_BOOT) {
 		ts.enable(TS_RENDER_BOOT);
-		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		Serial.print(F("Run APP_BOOT app\n")); term_post_command();
+		Serial.print(F("Run APP_BOOT app\n")); term_prompt();
 		return;
 	}
 
 	if (target_app == APP_CAL_HELP) {
 		ts.enable(TS_RENDER_CAL_HELP);
-		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		Serial.print(F("Run APP_CAL_HELP app\n")); term_post_command();
+		Serial.print(F("Run APP_CAL_HELP app\n")); term_prompt();
 		return;
 	}
 
 	if (target_app == APP_CAL_MEASURE) {
 		ts.enable(TS_RENDER_CAL_PROCESS);
-		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		Serial.print(F("Run APP_CAL_MEASURE app\n")); term_post_command();
+		Serial.print(F("Run APP_CAL_MEASURE app\n")); term_prompt();
 		return;
 	}
 
 	if (target_app == APP_SHUTDOWN) {
 		ts.enable(TS_RENDER_SHUTDOWN);
-		//No clear screen — this application draws the interface on top
-		//of the old app canvas (like is a popup window)
-		Serial.print(F("Run APP_SHUTDOWN app\n")); term_post_command();
+		Serial.print(F("Run APP_SHUTDOWN app\n")); term_prompt();
 		return;
 	}
 }
@@ -431,22 +429,21 @@ void change_app(APPS target_app){
 
 void button_click_handler() { //Switch applications cyclically at the touch of a button
 	Serial.print(F("Click\n"));
-	term_post_command();
+	term_prompt();
 
 	if 			(G_app_runned == APP_FLICKER_SIMPLE) 	change_app(APP_LIGHT); 						//clicking the button switching FLIKER_SIMPLE->LIGHT
 	else if (G_app_runned == APP_LIGHT) 					change_app(APP_FLICKER_GOST);			//clicking the button switching LIGHT->FLIKER_GOST
 	else if (G_app_runned == APP_FLICKER_GOST) 		change_app(APP_FLICKER_SIMPLE);		//clicking the button switching FLIKER_GOST->FLICKER_SIMPLE
 
 	else if (G_app_runned == APP_BOOT) 						change_app(APP_FLICKER_SIMPLE);		//clicking the button will skip the screen and calibration
-	else if (G_app_runned == APP_CAL_HELP) 				change_app(APP_CAL_MEASURE); 			//clicking the button starts the calibration(APP_CAL_MEASURE, cal_measure_screen_render)
-	else if (G_app_runned == APP_SHUTDOWN) 				change_app(APP_BOOT); 						//simulate rebooting
+	else if (G_app_runned == APP_CAL_HELP) 				change_app(APP_CAL_MEASURE); 			//clicking the button starts the calibration(APP_CAL_MEASURE, calibration_measure_render)
 	else 																					change_app(APP_SHUTDOWN); 				//strange behavior, fall down paws upwards
 	free_mem_calc();
 }
 
-void button_holded_handler() {
+void button_holded_handler() { //A long press to turn device off
   Serial.print(F("Holded\n"));
-	term_post_command();
+	term_prompt();
 
 	if 			(G_app_runned == APP_FLICKER_GOST) 		change_app(APP_SHUTDOWN); 				//power off
 	else if (G_app_runned == APP_FLICKER_SIMPLE) 	change_app(APP_SHUTDOWN);					//power off
@@ -458,16 +455,11 @@ void button_holded_handler() {
 	free_mem_calc();
 }
 
-void button_hold_handler() { //A long press to turn device off
-  //Serial.print(F("Hold\n"));
-	//term_post_command();
-	free_mem_calc();
-}
 
 //----------Screens render functions----------//
 
 
-void render_light_screen() {
+void luminance_render() {
 	uint16_t luminance_lx = G_luminance;
 	uint16_t score;
 	uint16_t score_color;
@@ -488,7 +480,7 @@ void render_light_screen() {
 
 	uint8_t arrow_diff = 0;
 	if (luminance_lx/8 > ST7735_TFT_WIDTH) arrow_diff = ST7735_TFT_WIDTH-7; //7 — ширина стрелки, для того, чтобы она не уходила за границы экрана
-	else arrow_diff = luminance_lx/8;
+	else arrow_diff = luminance_arrow_diff_filter.filtered((int)luminance_lx/8);
 	draw_asset(&arrow, arrow_diff, 56); //Arrow on the rainbow
 
 	draw_asset(&light_text_light_level, 0, 61); //Text "уровень освещенности"
@@ -582,7 +574,7 @@ void render_light_screen() {
 
 
 
-void render_flicker_screen() {
+void flicker_render() {
 	uint8_t flicker;
 	uint16_t freq = G_flicker_freq;
 	uint16_t adc_max = G_adc_values_max;
@@ -631,9 +623,6 @@ void render_flicker_screen() {
 	if (score == SCORE_TOO_LIGHT) 	score_color = ST7735_TFT_GRAY;
 	if (score == SCORE_TOO_DARK) 		score_color = ST7735_TFT_GRAY;
 	if (score == SCORE_INACC) 			score_color = ST7735_TFT_GRAY;
-
-
-
 
 
 
@@ -794,45 +783,44 @@ void boot_screen_render() {
 	free_mem_calc();
 }
 
-void cal_help_screen_render() {
+void calibration_help_render() {
 	uint8_t counter = G_cal_help_counter++; //local counter value before increment
 
 	framebuffer.fillScreen(ST7735_TFT_BLACK);
 	framebuffer.setCursor(0, 10);
 	framebuffer.setTextColor(ST7735_TFT_WHITE);
 	framebuffer.setTextSize(1);
-	//framebuffer.println(utf8rus("Во время калибровки"));
-	//framebuffer.println(utf8rus("не направляйте"));
-	//framebuffer.println(utf8rus("устройство на"));
-	//framebuffer.println(utf8rus("измеряемую лампу"));
+	framebuffer.println(utf8rus("Во время калибровки"));
+	framebuffer.println(utf8rus("не направляйте"));
+	framebuffer.println(utf8rus("устройство на"));
+	framebuffer.println(utf8rus("измеряемую лампу"));
 
-	framebuffer.println(utf8rus("ЭТОТ КОРАБЛЬ ЕСТЬ "));
-	framebuffer.println(utf8rus("ОПТИМИЗМ ЦЕНТРА "));
-	framebuffer.println(utf8rus("ПЕРСОНЫ КОРАБЛЯ"));
-  framebuffer.println(utf8rus("ВЫ НЕ УДАРИЛИ НАС"));
-  framebuffer.println(utf8rus("СЛЕДОВАТЕЛЬНО ВЫ "));
-	framebuffer.println(utf8rus("ЕДИТЕ МЛАДЕНЦЕВ"));
+	//framebuffer.println(utf8rus("ЭТОТ КОРАБЛЬ ЕСТЬ "));
+	//framebuffer.println(utf8rus("ОПТИМИЗМ ЦЕНТРА "));
+	//framebuffer.println(utf8rus("ПЕРСОНЫ КОРАБЛЯ"));
+  //framebuffer.println(utf8rus("ВЫ НЕ УДАРИЛИ НАС"));
+  //framebuffer.println(utf8rus("СЛЕДОВАТЕЛЬНО ВЫ "));
+	//framebuffer.println(utf8rus("ЕДИТЕ МЛАДЕНЦЕВ"));
 
 	uint8_t text_pixel_diff = 8;
 	if (counter <= text_pixel_diff) G_cal_help_text_y++;
 	if (counter >= text_pixel_diff) G_cal_help_text_y--;
 	if (G_cal_help_counter > text_pixel_diff*2) G_cal_help_counter = 0;
 
-
 	framebuffer.setCursor(0, G_cal_help_text_y);
-	framebuffer.println(utf8rus("ЧТО НАШЕ ТО ВАШЕ,"));
-  framebuffer.println(utf8rus("ЧТО ВАШЕ ТО НАШЕ"));
-	//framebuffer.println(utf8rus("Нажмите кнопку один"));
-	//framebuffer.println(utf8rus("раз для калибровки"));
-	//framebuffer.println(utf8rus("Или удерживайте для "));
-	//framebuffer.println(utf8rus("пропуска  --->"));
+	//framebuffer.println(utf8rus("ЧТО НАШЕ ТО ВАШЕ,"));
+  //framebuffer.println(utf8rus("ЧТО ВАШЕ ТО НАШЕ"));
+	framebuffer.println(utf8rus("Нажмите кнопку один"));
+	framebuffer.println(utf8rus("раз для калибровки"));
+	framebuffer.println(utf8rus("или удерживайте для "));
+	framebuffer.println(utf8rus("пропуска  --->"));
 
 
 	framebuffer.display();
 	free_mem_calc();
 }
 
-void cal_measure_screen_render() {
+void calibration_measure_render() {
 	uint8_t counter = G_cal_run_counter++; //local counter value before increment
 
 	if (counter < 10){ // 200ms*10cycles=2000ms
@@ -844,7 +832,7 @@ void cal_measure_screen_render() {
 		if 			(counter > 8) 	framebuffer.print(F("..."));
 		else if (counter > 5) 	framebuffer.print(F(".."));
 		else if (counter > 2) 	framebuffer.print(F("."));
-		G_adc_correction = cal_filter.filtered(get_adc_correction_value());
+		G_adc_correction = cal_filter.filtered(adc_value_measure());
 		framebuffer.setCursor(10, 120);
 		framebuffer.print((String)"Value:"+G_adc_correction+" adc p.");
 		framebuffer.display();
@@ -860,13 +848,50 @@ void cal_measure_screen_render() {
 
 
 void shutdown_screen_render() {
-	framebuffer.fillScreen(ST7735_TFT_BLACK); //Temporarily!
-	framebuffer.setCursor(34, 97);
-	framebuffer.setTextColor(ST7735_TFT_WHITE);
+	uint8_t counter = G_shutdown_run_counter; //local counter value before increment
+
+	if (counter == 0){
+		for (uint8_t y=0; y<ST7735_TFT_HEIGHT; y++) {
+			for (uint8_t x=0; x<ST7735_TFT_WIDTH; x++) {
+				uint16_t current_pixel = framebuffer.getPixel(x, y);
+				float divider = 0.4;
+				uint8_t r = ((((current_pixel >> 11) & 0x1F) * 527) + 23) >> 6;
+				uint8_t g = ((((current_pixel >> 5) & 0x3F) * 259) + 33) >> 6;
+				uint8_t b = (((current_pixel & 0x1F) * 527) + 23) >> 6;
+				r = r * divider;
+				g = g * divider;
+				b = b * divider;
+				current_pixel = framebuffer.color565(r, g, b);
+				framebuffer.drawPixel(x, y, current_pixel);
+			}
+		}
+	}
+
+	framebuffer.fillRoundRect(15, 32, 128-15-15, 35, 2, 0xa28a);
+
+	framebuffer.setTextColor(ST7735_TFT_BLACK);
 	framebuffer.setTextSize(1);
-	framebuffer.println(utf8rus("Выключение..."));
+
+	framebuffer.setCursor(30, 35);
+	framebuffer.println(utf8rus("Удерживайте"));
+	framebuffer.setCursor(30, 44);
+	framebuffer.println(utf8rus("кнопку для"));
+	framebuffer.setCursor(30, 53);
+	framebuffer.println(utf8rus("выключения"));
+
+	framebuffer.fillRoundRect(15, 74, 128-15-15, 5, 2, 0xe5b6);
+	framebuffer.fillRoundRect(15, 74, counter*2.5, 5, 2, 0x6904);
+	if (counter*2.5 > 128-15-15) ESP.restart(); //reboot
+
+	if (btn.state() == 0) {
+		G_shutdown_run_counter = 0;
+		change_app(G_app_previous);
+	}
+	else {
+		G_shutdown_run_counter++;
+	}
+
 	framebuffer.display();
-	ts.disableAll(); //Freeze until reboot
 	free_mem_calc();
 }
 
@@ -936,7 +961,7 @@ void term_eeprom_read() {
 	free_mem_calc();
 }
 
-void data_print() {
+void term_data_print() {
 	Serial.print("\n");
 	Serial.println((String)F("Flicker freq: \t\t\t")+G_flicker_freq+F(" Hz"));
 	Serial.println((String)F("Flicker (simple): \t\t")+G_flicker_simple+F(" %"));
@@ -957,7 +982,7 @@ void data_print() {
 void term_init()
 {
   term.setSerialEcho(true);
-	term.addCommand("data", data_print);
+	term.addCommand("data", term_data_print);
 	term.addCommand("help", term_help);
 	term.addCommand("reboot", ESP.restart);
 	term.addCommand("erase", eeprom_clear);
@@ -965,8 +990,8 @@ void term_init()
 	term.addCommand("app", term_run_app);
 	term.addCommand("ewrite", term_eeprom_write);
 	term.addCommand("eread", term_eeprom_read);
-	term.addCommand("[A", data_print);
-	term.setPostCommandHandler(term_post_command);
+	term.addCommand("[A", term_data_print);
+	term.setPostCommandHandler(term_prompt);
 	term.setDefaultHandler(term_unknown_command);
 }
 
@@ -991,7 +1016,7 @@ void term_unknown_command(const char *command)
 	term_help();
 }
 
-void term_post_command() {
+void term_prompt() {
   Serial.print(F("> "));
 }
 
@@ -1020,7 +1045,7 @@ void eeprom_clear() {
   for (int i = 0; i < EEPROM_SIZE; i++) { EEPROM.write(i, 0); }
 	EEPROM.commit();
 	Serial.print(F("EEPROM erase complete\n"));
-	term_post_command();
+	term_prompt();
 }
 
 
@@ -1039,10 +1064,9 @@ void setup(void) {
 
 	//attachInterrupt(BUTTON_PIN, isr, CHANGE); //button interrupt
 	btn.setButtonLevel(HIGH);
-	btn.setHoldTimeout(1000);
+	btn.setHoldTimeout(400);
 	btn.attach(CLICK_HANDLER, button_click_handler);
 	btn.attach(HOLDED_HANDLER, button_holded_handler);
-	btn.attach(HOLD_HANDLER, button_hold_handler);
 	//btn.attach(CLICKS_HANDLER, myClicks);
   //btn.attachClicks(5, fiveClicks);
 	Serial.print(F("Buttons triggers attach\n"));
@@ -1065,14 +1089,14 @@ void setup(void) {
 	Serial.print(F("Console initialized\n"));
 
 
-	ts.add(TS_MEASURE_LIGHT, 			 200,  [&](void *) { measure_light(); 				  	}, nullptr, false);
-	ts.add(TS_MEASURE_FLICKER, 		 200,  [&](void *) { measure_flicker(); 					}, nullptr, false);
-	ts.add(TS_RENDER_FLICKER, 		 200,  [&](void *) { render_flicker_screen();  	  }, nullptr, false);
-	ts.add(TS_RENDER_LIGHT, 			 200,  [&](void *) { render_light_screen(); 			}, nullptr, false);
-	ts.add(TS_RENDER_BOOT, 				 200,  [&](void *) { boot_screen_render(); 			  }, nullptr, false);
-	ts.add(TS_RENDER_SHUTDOWN, 		 200,  [&](void *) { shutdown_screen_render(); 	  }, nullptr, false);
-	ts.add(TS_RENDER_CAL_HELP, 		 100,  [&](void *) { cal_help_screen_render(); 		}, nullptr, false);
-	ts.add(TS_RENDER_CAL_PROCESS,  200,  [&](void *) { cal_measure_screen_render(); }, nullptr, false);
+	ts.add(TS_MEASURE_LIGHT, 			 200,  [&](void *) { luminance_measure(); 				  }, nullptr, false);
+	ts.add(TS_MEASURE_FLICKER, 		 200,  [&](void *) { flicker_measure(); 						}, nullptr, false);
+	ts.add(TS_RENDER_FLICKER, 		 200,  [&](void *) { flicker_render();  	  				}, nullptr, false);
+	ts.add(TS_RENDER_LIGHT, 			 200,  [&](void *) { luminance_render(); 						}, nullptr, false);
+	ts.add(TS_RENDER_BOOT, 				 200,  [&](void *) { boot_screen_render(); 			  	}, nullptr, false);
+	ts.add(TS_RENDER_SHUTDOWN, 		  60,  [&](void *) { shutdown_screen_render(); 	  	}, nullptr, false);
+	ts.add(TS_RENDER_CAL_HELP, 		  80,  [&](void *) { calibration_help_render(); 		}, nullptr, false);
+	ts.add(TS_RENDER_CAL_PROCESS,  200,  [&](void *) { calibration_measure_render(); 	}, nullptr, false);
 	ts.disableAll();
 	Serial.print(F("Sheduler initialized\n"));
 
