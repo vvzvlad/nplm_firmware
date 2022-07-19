@@ -70,6 +70,9 @@
 
 #define EEPROM_SIZE 		  			100
 
+#define LUMINANCE_NORMAL 				200
+#define LUMINANCE_GOOD 					300
+
 typedef Adafruit_ST7735 display_t;
 typedef Adafruit_GFX_Buffer<display_t> GFXBuffer_t;
 GFXBuffer_t framebuffer = GFXBuffer_t(ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT, display_t(ST7735_TFT_CS, ST7735_TFT_DC, ST7735_TFT_RST));
@@ -86,6 +89,7 @@ GKalman luminance_arrow_diff_filter(3, 0.3);
 GKalman flicker_simple_filter(3, 0.3);
 GKalman flicker_gost_filter(3, 0.3);
 GyverLBUF<uint8_t, 6> flicker_accuracy_buf;
+GyverLBUF<uint8_t, 128> lum_graph_buf_log;
 
 volatile uint16_t G_adc_correction = 0;
 
@@ -102,9 +106,12 @@ volatile uint8_t G_shutdown_run_counter = 0;
 volatile uint8_t G_cal_help_counter = 0;
 volatile uint8_t G_cal_help_text_y = 100;
 
-GyverLBUF<uint8_t, 128> lum_graph_buf_log;
+
+
 
 volatile uint16_t G_luminance = 0;
+volatile uint16_t G_eeprom_luminance_normal_point = LUMINANCE_NORMAL;
+volatile uint16_t G_eeprom_luminance_good_point = LUMINANCE_GOOD;
 
 //EEPROM data mirror in global variables
 volatile APPS G_eeprom_last_app = APP_UNKNOWN;
@@ -463,14 +470,18 @@ void luminance_render() {
 	uint16_t luminance_lx = G_luminance;
 	uint16_t score;
 	uint16_t score_color;
+	uint16_t normal_p = G_eeprom_luminance_normal_point;
+	uint16_t good_p = G_eeprom_luminance_good_point;
 
 	framebuffer.setTextColor(ST7735_TFT_WHITE);
 	framebuffer.fillRoundRect(0, 0, ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT-GRAPH_HEIGHT, 0, ST7735_TFT_BLACK); //Clearing only the image above the graph!
 
 	//------ Calc score ------//
-	if 			(luminance_lx >= 0 && luminance_lx <= 200)		score = SCORE_BAD;
-	else if (luminance_lx > 200 && luminance_lx <= 300)		score = SCORE_NORMAL; //TODO в дефайны!
-	else if (luminance_lx > 300)													score = SCORE_GOOD;
+
+
+	if 			(luminance_lx >= 0 && luminance_lx <= normal_p)				score = SCORE_BAD;
+	else if (luminance_lx > normal_p && luminance_lx <= good_p)		score = SCORE_NORMAL;
+	else if (luminance_lx > good_p)																score = SCORE_GOOD;
 
 	//Drawing the labels "good light", "dark lamp"
 	if 			(score == SCORE_GOOD) 													draw_asset(&light_msg_good, 0, 0);
@@ -489,10 +500,10 @@ void luminance_render() {
 	//------ Draw lux text ------//
 	framebuffer.setFont(&verdana_bold12pt7b); //LARGE text font
 	framebuffer.setTextSize(0);
-	String lux_value;
+	String lx_value;
 
-	if 			(luminance_lx < 1000)			lux_value = (String)(luminance_lx)+			 " lx";
-	else if (luminance_lx >= 1000) 		lux_value = (String)(luminance_lx/1000)+" klx";
+	if 			(luminance_lx < 1000)			lx_value = (String)(luminance_lx)+			 " lx";
+	else if (luminance_lx >= 1000) 		lx_value = (String)(luminance_lx/1000)+" klx";
 
 	if 			(score == SCORE_GOOD)			score_color = ST7735_TFT_GREEN;
 	else if (score == SCORE_NORMAL)		score_color = ST7735_TFT_YELLOW;
@@ -503,7 +514,7 @@ void luminance_render() {
 	int16_t text_start_x, text_start_y; //not used
 	uint16_t text_width, text_height;
 
-	framebuffer.getTextBounds(lux_value,  			 //Fucking magic to
+	framebuffer.getTextBounds(lx_value,  			 //Fucking magic to
 														cursor_x,					 //align text horizontally.
 														cursor_y,
 														&text_start_x,
@@ -515,7 +526,7 @@ void luminance_render() {
 	cursor_x = (ST7735_TFT_WIDTH-text_width)/2;
 	framebuffer.setTextColor(score_color);
 	framebuffer.setCursor(cursor_x, cursor_y);
-	framebuffer.print(lux_value);
+	framebuffer.print(lx_value);
 	framebuffer.setFont(); //Reset LARGE text font to the default
 
 
@@ -550,9 +561,9 @@ void luminance_render() {
 	//Drawing the graph
 	for (uint8_t current_colon = GRAPH_X; current_colon < GRAPH_WIDTH; current_colon++) {
 		uint16_t graph_color;
-		if 			(lum_graph_buf_log.read(current_colon) <= (uint8_t)(log2(200)/log2(1.24)))		graph_color = ST7735_TFT_RED;
-		else if (lum_graph_buf_log.read(current_colon) <= (uint8_t)(log2(300)/log2(1.24)))		graph_color = ST7735_TFT_YELLOW;
-		else 																																									graph_color = ST7735_TFT_GREEN;
+		if 			(lum_graph_buf_log.read(current_colon) <= (uint8_t)(log2(normal_p)/log2(1.24)))		graph_color = ST7735_TFT_RED;
+		else if (lum_graph_buf_log.read(current_colon) <= (uint8_t)(log2(good_p)/log2(1.24)))			graph_color = ST7735_TFT_YELLOW;
+		else 																																											graph_color = ST7735_TFT_GREEN;
 
 		if (current_colon == 0) {
 			framebuffer.drawPixel(current_colon, //The first point is drawn as a pixel because it has no past point
@@ -950,6 +961,22 @@ void term_eeprom_write() {
 	free_mem_calc();
 }
 
+void term_lum_write() {
+	char *arg;
+	uint16_t normal;
+	uint16_t good;
+	arg = term.getNext();
+	if (arg != NULL) normal = atoi(arg);
+	arg = term.getNext();
+	if (arg != NULL) good = atoi(arg);
+	G_eeprom_luminance_normal_point = normal;
+	G_eeprom_luminance_good_point = good;
+	EEPROM.put(EEPROM_LUMINANCE_NORMAL, normal);
+	EEPROM.put(EEPROM_LUMINANCE_GOOD, good);
+	EEPROM.commit();
+	free_mem_calc();
+}
+
 void term_eeprom_read() {
 	char *arg;
 	uint8_t addr;
@@ -970,6 +997,7 @@ void term_data_print() {
 	Serial.println((String)F("ADC values max: \t\t")+G_adc_values_max+F(" adc points"));
 	Serial.println((String)F("ADC values min: \t\t")+G_adc_values_min+F(" adc points"));
 	Serial.println((String)F("Luminance: \t\t\t")+G_luminance+F(" lx"));
+	Serial.println((String)F("Luminance normal/good: \t\t")+G_eeprom_luminance_normal_point+"/"+G_eeprom_luminance_good_point+F(" lx"));
 	Serial.println((String)F("Free memory: \t\t\t")+system_get_free_heap_size()+F(" bytes"));
 	Serial.println((String)F("Free memory (min): \t\t")+G_min_free_mem+F(" bytes"));
 	Serial.println((String)F("App running: \t\t\tenum APP #")+G_app_runned+F(""));
@@ -989,6 +1017,7 @@ void term_init()
 	term.addCommand("cal", term_calibration_enable_disable);
 	term.addCommand("app", term_run_app);
 	term.addCommand("ewrite", term_eeprom_write);
+	term.addCommand("lum", term_lum_write);
 	term.addCommand("eread", term_eeprom_read);
 	term.addCommand("[A", term_data_print);
 	term.setPostCommandHandler(term_prompt);
@@ -998,14 +1027,15 @@ void term_init()
 void term_help()
 {
 	Serial.println(F("Console usage:"));
-	Serial.println(F("  help/any			print this usage")); //todo: сделать настройку режимов и сохранение в eeprom
-	Serial.println(F("  data				Show all data"));
-	Serial.println(F("  reboot			Reboot"));
-	Serial.println(F("  cal enable/disable		enable or disable calibration process after start"));
-	Serial.println(F("  app [num]			run app"));
-	Serial.println(F("  ewrite [addr] [value]		write value to eeprom at addr"));
-	Serial.println(F("  eread [addr]			read value from eeprom at addr"));
-	Serial.println(F("  erase				Erase all eeprom settings"));
+	Serial.println(F("  help/any				print this usage")); //todo: сделать настройку режимов и сохранение в eeprom
+	Serial.println(F("  data					Show all data"));
+	Serial.println(F("  reboot				Reboot"));
+	Serial.println(F("  cal enable/disable			enable or disable calibration process after start"));
+	Serial.println(F("  lum [normal value] [good value]	write lum values"));
+	Serial.println(F("  app [num]				run app"));
+	Serial.println(F("  ewrite [addr] [value]			write value to eeprom at addr"));
+	Serial.println(F("  eread [addr]				read value from eeprom at addr"));
+	Serial.println(F("  erase					Erase all eeprom settings"));
 }
 
 void term_unknown_command(const char *command)
@@ -1032,12 +1062,16 @@ void eeprom_init() {
 		EEPROM.put(EEPROM_SIZE-4, eeprom_flag);
 		EEPROM.put(EEPROM_LAST_APP, G_eeprom_last_app);
 		EEPROM.put(EEPROM_CALIBRATION_ACTIVE, G_eeprom_calibration);
+		EEPROM.put(EEPROM_LUMINANCE_NORMAL, G_eeprom_luminance_normal_point);
+		EEPROM.put(EEPROM_LUMINANCE_GOOD, G_eeprom_luminance_good_point);
 		EEPROM.commit();
 		Serial.print(F("First start, eeprom clear and initialized\n"));
 	}
 	else{
 		EEPROM.get(EEPROM_LAST_APP, G_eeprom_last_app);
 		EEPROM.get(EEPROM_CALIBRATION_ACTIVE, G_eeprom_calibration);
+		EEPROM.get(EEPROM_LUMINANCE_NORMAL, G_eeprom_luminance_normal_point);
+		EEPROM.get(EEPROM_LUMINANCE_GOOD, G_eeprom_luminance_good_point);
 	}
 }
 
