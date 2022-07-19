@@ -1,5 +1,5 @@
-enum APPS {
-	APP_BOOT,
+typedef enum: uint8_t {
+  APP_BOOT,
 	APP_FLICKER_SIMPLE,
   APP_FLICKER_GOST,
 	APP_LIGHT,
@@ -8,9 +8,9 @@ enum APPS {
 	APP_CAL_HELP,
 	APP_CAL_MEASURE,
 	APP_UNKNOWN
-};
+} APPS;
 
-enum TASKS {
+typedef enum: uint8_t {
 	TS_MEASURE_LIGHT,
 	TS_MEASURE_FLICKER,
 	TS_RENDER_FLICKER,
@@ -21,28 +21,34 @@ enum TASKS {
 	TS_RENDER_CAL_PROCESS,
 	TS_DEBUG,
 	TS_MAX,
-};
+} TASKS;
 
-enum ACCURACY {
+typedef enum: uint8_t {
 	A_ACCURACY,
 	A_INACCURACY,
-};
+} ACCURACY;
 
-enum SCORE {
+typedef enum: uint8_t {
 	SCORE_TOO_LIGHT,
 	SCORE_TOO_DARK,
 	SCORE_GOOD,
 	SCORE_NORMAL,
 	SCORE_BAD,
 	SCORE_INACC,
-};
+} SCORE;
 
-enum FLIKER_TYPE_CALC {
+typedef enum: uint8_t {
 	FT_SIMPLE,
 	FT_GOST,
-};
+} FLIKER_TYPE_CALC;
+
+typedef enum: uint8_t {
+  FLAG_INACTIVE,
+	FLAG_ACTIVE,
+} FLAG;
 
 
-enum EEPROM_ADDR {
+typedef enum: uint8_t {
 	EEPROM_LAST_APP,
-};
+  EEPROM_CALIBRATION_ACTIVE,
+} EEPROM_ADDR;

@@ -23,6 +23,7 @@
 
 
 //Debug: Serial.println(__LINE__);
+// Serial.print((String)__LINE__+": "+target_app+"\n");
 
 #define ST7735_TFT_CS         	4 		//D2  //белый https://cdn.compacttool.ru/images/docs/Wemos_D1_mini_pinout.jpg
 #define ST7735_TFT_RST        	-1  	//желтый
@@ -101,8 +102,11 @@ GyverLBUF<uint8_t, 128> lum_graph_buf;
 
 volatile uint16_t G_lum = 0;
 
-volatile APPS G_last_app = APP_UNKNOWN;
-volatile uint8_t G_flag_first_run = 1;
+//EEPROM data mirror in global variables
+volatile APPS G_eeprom_last_app = APP_UNKNOWN;
+volatile FLAG G_eeprom_calibration = FLAG_ACTIVE;
+
+volatile FLAG G_flag_first_run = FLAG_ACTIVE;
 volatile APPS G_app_runned = APP_UNKNOWN;
 volatile FLIKER_TYPE_CALC G_F_type = FT_SIMPLE;
 
@@ -382,10 +386,10 @@ uint16_t calc_frequency(uint16_t *adc_values_array, uint16_t adc_values_min_max_
 	uint16_t adc_mean_values_i = 0;
 
 	uint16_t acc=0;
-	uint8_t not_found_flag = 0;
+	FLAG not_found_flag = FLAG_INACTIVE;
 
-	while(not_found_flag == 0) {
-		not_found_flag=1;
+	while(not_found_flag == FLAG_INACTIVE) {
+		not_found_flag=FLAG_ACTIVE;
 		for (uint16_t i=acc; i<MEASURE_NUM_SAMPLES; i++) {
 			if (adc_values_array[i] > adc_values_min_max_mean)
 			{
@@ -393,14 +397,14 @@ uint16_t calc_frequency(uint16_t *adc_values_array, uint16_t adc_values_min_max_
 				//framebuffer.drawLine(i/GRAPH_WIDTH_DIVIDER, 110, i/GRAPH_WIDTH_DIVIDER, 160, ST7735_TFT_CYAN);
 				//framebuffer.display();
 				acc = i+20;
-				not_found_flag = 0;
+				not_found_flag = FLAG_INACTIVE;
 				break;
 			}
 		}
 
 		for (uint16_t i=acc; i<MEASURE_NUM_SAMPLES; i++) {
-			if (not_found_flag == 1) break;
-			else not_found_flag == 1;
+			if (not_found_flag == FLAG_ACTIVE) break;
+			else not_found_flag == FLAG_ACTIVE;
 
 			if (adc_values_array[i] < adc_values_min_max_mean)
 			{
@@ -410,7 +414,7 @@ uint16_t calc_frequency(uint16_t *adc_values_array, uint16_t adc_values_min_max_
 				adc_mean_values[adc_mean_values_i] = i;
 				adc_mean_values_i++;
 				acc = i+20;
-				not_found_flag = 0;
+				not_found_flag = FLAG_INACTIVE;
 				break;
 			}
 		}
@@ -602,20 +606,16 @@ void change_app(APPS target_app){
 	if (G_app_runned == target_app) {return;}
 
 	if (target_app == APP_FLICKER_SIMPLE || target_app == APP_FLICKER_GOST || target_app == APP_LIGHT) {
-		//Serial.println(__LINE__);
-		//Serial.println(G_last_app);
-		//Serial.println(G_flag_first_run);
-		if (G_last_app != APP_UNKNOWN && G_flag_first_run == 1) {
-			target_app = G_last_app;
-			G_flag_first_run = 0;
+		EEPROM.put(EEPROM_LAST_APP, target_app); EEPROM.commit();
+		if (G_eeprom_last_app != APP_UNKNOWN && G_flag_first_run == FLAG_ACTIVE) {
+			target_app = G_eeprom_last_app;
+			G_flag_first_run = FLAG_INACTIVE;
 		}
 	}
 
 
-
 	G_app_runned = target_app;
 	ts.disableAll();
-	ts.enable(TS_DEBUG);
 	ts.enable(TS_MEASURE_FLICKER); //To quickly update the values when switching
 	ts.enable(TS_MEASURE_LIGHT);   //applications, the metering processes is always on
 
@@ -623,7 +623,6 @@ void change_app(APPS target_app){
 		G_F_type = FT_SIMPLE;
 		ts.enable(TS_RENDER_FLICKER);
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		EEPROM.put(EEPROM_LAST_APP, target_app); EEPROM.commit();
 		Serial.print(F("Run APP_FLICKER_SIMPLE app\n")); term_post_command();
 		return;
 	}
@@ -632,7 +631,6 @@ void change_app(APPS target_app){
 		G_F_type = FT_GOST;
 		ts.enable(TS_RENDER_FLICKER);
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		EEPROM.put(EEPROM_LAST_APP, target_app); EEPROM.commit();
 		Serial.print(F("Run APP_FLICKER_GOST app\n")); term_post_command();
 		return;
 	}
@@ -640,7 +638,6 @@ void change_app(APPS target_app){
 	if (target_app == APP_LIGHT) {
 		ts.enable(TS_RENDER_LIGHT);
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
-		EEPROM.put(EEPROM_LAST_APP, target_app); EEPROM.commit();
 		Serial.print(F("Run APP_LIGHT app\n")); term_post_command();
 		return;
 	}
@@ -824,42 +821,100 @@ void free_mem_calc() {
 	if (G_min_free_mem > current_free_mem) G_min_free_mem = current_free_mem;
 }
 
+void term_calibration_enable_disable() {
+	char *arg = term.getNext();
+	if (arg != NULL && strcmp(arg, "enable") == 0) {
+		EEPROM.put(EEPROM_CALIBRATION_ACTIVE, FLAG_ACTIVE); EEPROM.commit();
+	}
+	else if (arg != NULL && strcmp(arg, "disable") == 0) {
+		EEPROM.put(EEPROM_CALIBRATION_ACTIVE, FLAG_INACTIVE); EEPROM.commit();
+	}
+	else term_help();
+	free_mem_calc();
+}
 
-void debug() {
-	//memory_print();
+void term_run_app() {
+	char *arg = term.getNext();
+	if (arg != NULL) change_app((APPS)atoi(arg));
+	free_mem_calc();
+}
+
+void term_eeprom_write() {
+	char *arg;
+	uint8_t addr;
+	uint8_t value;
+	arg = term.getNext();
+	if (arg != NULL) addr = atoi(arg);
+	arg = term.getNext();
+	if (arg != NULL) value = atoi(arg);
+	EEPROM.put(addr, value); EEPROM.commit();
+	free_mem_calc();
+}
+
+void term_eeprom_read() {
+	char *arg;
+	uint8_t addr;
+	uint8_t value;
+	arg = term.getNext();
+	if (arg != NULL) addr = atoi(arg);
+	EEPROM.get(addr, value);
+	Serial.println((String)F("EEPROM value: \t")+value+F("\n"));
+	free_mem_calc();
 }
 
 void data_print() {
 	Serial.print("\n");
-	Serial.println((String)F("Flicker freq: \t\t")+G_flicker_freq+F(" Hz"));
-	Serial.println((String)F("Flicker (simple): \t")+G_flicker_simple+F(" %"));
-	Serial.println((String)F("Flicker (gost): \t")+G_flicker_gost+F(" %"));
-	Serial.println((String)F("ADC calibration: \t")+G_adc_correction+F(" adc points"));
-	Serial.println((String)F("ADC values max: \t")+G_adc_values_max+F(" adc points"));
-	Serial.println((String)F("ADC values min: \t")+G_adc_values_min+F(" adc points"));
-	Serial.println((String)F("Luminance: \t\t")+G_lum+F(" lx"));
-	Serial.println((String)F("Free memory: \t\t")+system_get_free_heap_size()+F(" bytes"));
-	Serial.println((String)F("Free memory (min): \t")+G_min_free_mem+F(" bytes"));
-	Serial.println((String)F("App running: \t\tenum APP #")+G_app_runned+F(""));
-	Serial.println((String)F("Last app (eeprom): \tenum APP #")+EEPROM.read(EEPROM_LAST_APP)+F(""));
+	Serial.println((String)F("Flicker freq: \t\t\t")+G_flicker_freq+F(" Hz"));
+	Serial.println((String)F("Flicker (simple): \t\t")+G_flicker_simple+F(" %"));
+	Serial.println((String)F("Flicker (gost): \t\t")+G_flicker_gost+F(" %"));
+	Serial.println((String)F("ADC calibration: \t\t")+G_adc_correction+F(" adc points"));
+	Serial.println((String)F("ADC values max: \t\t")+G_adc_values_max+F(" adc points"));
+	Serial.println((String)F("ADC values min: \t\t")+G_adc_values_min+F(" adc points"));
+	Serial.println((String)F("Luminance: \t\t\t")+G_lum+F(" lx"));
+	Serial.println((String)F("Free memory: \t\t\t")+system_get_free_heap_size()+F(" bytes"));
+	Serial.println((String)F("Free memory (min): \t\t")+G_min_free_mem+F(" bytes"));
+	Serial.println((String)F("App running: \t\t\tenum APP #")+G_app_runned+F(""));
+	Serial.println((String)F("Last app (eeprom): \t\tenum APP #")+EEPROM.read(EEPROM_LAST_APP)+F(""));
+	Serial.println((String)F("First run flag: \t\t")+G_flag_first_run+F(""));
+	Serial.println((String)F("Calibration disable (eeprom): \t")+EEPROM.read(EEPROM_CALIBRATION_ACTIVE)+F(""));
 	free_mem_calc();
+}
+
+void term_init()
+{
+  term.setSerialEcho(true);
+	term.addCommand("data", data_print);
+	term.addCommand("help", term_help);
+	term.addCommand("reboot", ESP.restart);
+	term.addCommand("erase", eeprom_clear);
+	term.addCommand("cal", term_calibration_enable_disable);
+	term.addCommand("app", term_run_app);
+	term.addCommand("ewrite", term_eeprom_write);
+	term.addCommand("eread", term_eeprom_read);
+	term.addCommand("[A", data_print);
+	term.setPostCommandHandler(term_post_command);
+	term.setDefaultHandler(term_unknown_command);
 }
 
 void term_help()
 {
-    Serial.println(F("Console usage:"));
-    Serial.println(F("  help			Print this usage")); //todo: сделать настройку режимов и сохранение в eeprom
-		Serial.println(F("  data			Show all data"));
-		Serial.println(F("  reboot		Reboot"));
-		Serial.println(F("  erase			Erase all eeprom settings"));
+	Serial.println(F("Console usage:"));
+	Serial.println(F("  help/any			print this usage")); //todo: сделать настройку режимов и сохранение в eeprom
+	Serial.println(F("  data				Show all data"));
+	Serial.println(F("  reboot			Reboot"));
+	Serial.println(F("  cal enable/disable		enable or disable calibration process after start"));
+	Serial.println(F("  app [num]			run app"));
+	Serial.println(F("  ewrite [addr] [value]		write value to eeprom at addr"));
+	Serial.println(F("  eread [addr]			read value from eeprom at addr"));
+	Serial.println(F("  erase				Erase all eeprom settings"));
 }
 
 void term_unknown_command(const char *command)
 {
-    Serial.print(F("Unknown command: "));
-    Serial.println(command);
-		Serial.println("\n");
-		term_help();
+	Serial.print(F("Unknown command: "));
+	Serial.println(command);
+	Serial.println("\n");
+	term_help();
 }
 
 void term_post_command() {
@@ -868,6 +923,25 @@ void term_post_command() {
 
 void isr() {
   btn.tickISR();
+}
+
+void eeprom_init() {
+	uint32_t eeprom_flag = 0xDEADBEEF;
+	uint32_t eeprom_value = 0;
+  EEPROM.begin(EEPROM_SIZE);
+	EEPROM.get(EEPROM_SIZE-4, eeprom_value);
+	if (eeprom_value != eeprom_flag){
+		eeprom_clear();
+		EEPROM.put(EEPROM_SIZE-4, eeprom_flag);
+		EEPROM.put(EEPROM_LAST_APP, G_eeprom_last_app);
+		EEPROM.put(EEPROM_CALIBRATION_ACTIVE, G_eeprom_calibration);
+		EEPROM.commit();
+		Serial.print(F("First start, eeprom clear and initialized\n"));
+	}
+	else{
+		EEPROM.get(EEPROM_LAST_APP, G_eeprom_last_app);
+		EEPROM.get(EEPROM_CALIBRATION_ACTIVE, G_eeprom_calibration);
+	}
 }
 
 void eeprom_clear() {
@@ -899,19 +973,7 @@ void setup(void) {
   LightSensor.begin();
 	Serial.print(F("Light sensor initialized\n"));
 
-	EEPROM.begin(EEPROM_SIZE);
-	uint32_t eeprom_flag = 0xDEADBEEF;
-	uint32_t eeprom_value = 0;
-	EEPROM.get(EEPROM_SIZE-4, eeprom_value);
-	if (eeprom_value != eeprom_flag){
-		eeprom_clear();
-		EEPROM.put(EEPROM_SIZE-4, eeprom_flag);
-		EEPROM.commit();
-		Serial.print(F("First start, eeprom clear and initialized\n"));
-	}
-	else{
-		EEPROM.get(EEPROM_LAST_APP, G_last_app);
-	}
+	eeprom_init();
 	Serial.print(F("EEPROM init\n"));
 
 
@@ -922,31 +984,29 @@ void setup(void) {
 	Serial.print(F("Framebuffer initialized\n"));
 
 
-	term.setSerialEcho(true);
-	term.addCommand("data", data_print);
-	term.addCommand("help", term_help);
-	term.addCommand("reboot", ESP.restart);
-	term.addCommand("erase", eeprom_clear);
-	term.setPostCommandHandler(term_post_command);
-	term.setDefaultHandler(term_unknown_command);
-	Serial.print(F("Terminal initialized\n"));
+	term_init();
+	Serial.print(F("Console initialized\n"));
 
 
 	ts.add(TS_MEASURE_LIGHT, 			 200,  [&](void *) { measure_light(); 				  	}, nullptr, false);
 	ts.add(TS_MEASURE_FLICKER, 		 200,  [&](void *) { measure_flicker(); 					}, nullptr, false);
 	ts.add(TS_RENDER_FLICKER, 		 200,  [&](void *) { render_flicker_screen();  	  }, nullptr, false);
 	ts.add(TS_RENDER_LIGHT, 			 200,  [&](void *) { render_light_screen(); 			}, nullptr, false);
-	ts.add(TS_DEBUG, 							 5000, [&](void *) { debug(); 										}, nullptr, false);
 	ts.add(TS_RENDER_BOOT, 				 200,  [&](void *) { boot_screen_render(); 			  }, nullptr, false);
 	ts.add(TS_RENDER_SHUTDOWN, 		 200,  [&](void *) { shutdown_screen_render(); 	  }, nullptr, false);
 	ts.add(TS_RENDER_CAL_HELP, 		 100,  [&](void *) { cal_help_screen_render(); 		}, nullptr, false);
 	ts.add(TS_RENDER_CAL_PROCESS,  200,  [&](void *) { cal_measure_screen_render(); }, nullptr, false);
 	ts.disableAll();
-	ts.enable(TS_DEBUG);
 	Serial.print(F("Sheduler initialized\n"));
 
 	free_mem_calc();
-	change_app(APP_BOOT);
+
+	if (G_eeprom_calibration == FLAG_INACTIVE) {
+		change_app(APP_FLICKER_SIMPLE);
+	}
+	else change_app(APP_BOOT);
+
+
 	Serial.print(F("\n> "));
 }
 
