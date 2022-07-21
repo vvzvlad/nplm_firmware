@@ -753,35 +753,15 @@ void calibration_help_render() {
 	if (counter >= text_pixel_diff) G_cal_help_text_y--;
 	if (G_cal_help_counter > text_pixel_diff*2) G_cal_help_counter = 0;
 
-	draw_asset(&cal_help_screen, 0, 0);
-	draw_asset(&cal_help_screen_msg, 0, G_cal_help_text_y);
-
-	//framebuffer.fillScreen(ST7735_TFT_BLACK);
-	//framebuffer.setCursor(0, 10);
-	//framebuffer.setTextColor(ST7735_TFT_WHITE);
-	//framebuffer.setTextSize(1);
-	//framebuffer.println(utf8rus("Во время калибровки"));
-	//framebuffer.println(utf8rus("не направляйте"));
-	//framebuffer.println(utf8rus("устройство на"));
-	//framebuffer.println(utf8rus("измеряемую лампу"));
-//
-	////framebuffer.println(utf8rus("ЭТОТ КОРАБЛЬ ЕСТЬ "));
-	////framebuffer.println(utf8rus("ОПТИМИЗМ ЦЕНТРА "));
-	////framebuffer.println(utf8rus("ПЕРСОНЫ КОРАБЛЯ"));
-  ////framebuffer.println(utf8rus("ВЫ НЕ УДАРИЛИ НАС"));
-  ////framebuffer.println(utf8rus("СЛЕДОВАТЕЛЬНО ВЫ "));
-	////framebuffer.println(utf8rus("ЕДИТЕ МЛАДЕНЦЕВ"));
-//
-//
-//
-	//framebuffer.setCursor(0, G_cal_help_text_y);
-	////framebuffer.println(utf8rus("ЧТО НАШЕ ТО ВАШЕ,"));
-  ////framebuffer.println(utf8rus("ЧТО ВАШЕ ТО НАШЕ"));
-	//framebuffer.println(utf8rus("Нажмите кнопку один"));
-	//framebuffer.println(utf8rus("раз для калибровки"));
-	//framebuffer.println(utf8rus("или удерживайте для "));
-	//framebuffer.println(utf8rus("пропуска  --->"));
-
+	uint8_t easter = 1;
+	if (easter == 1){
+		draw_asset(&cal_help_screen_easter, 0, 0);
+		draw_asset(&cal_help_screen_msg_easter, 0, G_cal_help_text_y);
+	}
+	else {
+		draw_asset(&cal_help_screen, 0, 0);
+		draw_asset(&cal_help_screen_msg, 0, G_cal_help_text_y);
+	}
 
 	framebuffer.display();
 	free_mem_calc();
