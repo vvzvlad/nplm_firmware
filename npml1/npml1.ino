@@ -68,7 +68,9 @@
 #define MAX_ADC_VALUE 					1024
 #define TOO_LIGHT_ADC_VALUE 		1000
 #define TOO_DARK_ADC_VALUE 		  20
-
+#define SCORE_NORMAL_POINT 			5
+#define SCORE_BAD_POINT 				35
+#define FLIKER_ACCURACY_SPAN 		2
 #define NO_FLICKER_FREQ_VALUE 	300 //Flicker with a frequency greater than 300 Hz is considered safe, so it does not count in the rating
 #define NO_FREQ_FLICKER_VALUE 	5   //At low flicker level the frequency count is wrong and strobes
 
@@ -536,13 +538,12 @@ void flicker_render() {
 
 	//------ Calc accuracy flag ------//
 	flicker_accuracy_buf.write(flicker);
-	uint8_t diff = 2;  //TODO в дефайны!
 	uint8_t flicker_acc_max_level;
 	uint8_t flicker_acc_min_level;
-	if (flicker+diff > 255) flicker_acc_max_level = 255;
-	else flicker_acc_max_level = flicker+diff;
-	if (flicker-diff < 0) flicker_acc_min_level = 0;
-	else flicker_acc_min_level = flicker-diff;
+	if (flicker+FLIKER_ACCURACY_SPAN > 255) flicker_acc_max_level = 255;
+	else flicker_acc_max_level = flicker+FLIKER_ACCURACY_SPAN;
+	if (flicker-FLIKER_ACCURACY_SPAN < 0) flicker_acc_min_level = 0;
+	else flicker_acc_min_level = flicker-FLIKER_ACCURACY_SPAN;
 	for (int j = 0; j < 4; j++) {
 		if (flicker_accuracy_buf.read(j) < flicker_acc_min_level ||
 				flicker_accuracy_buf.read(j) > flicker_acc_max_level)
@@ -550,13 +551,13 @@ void flicker_render() {
 	}
 
 	//------ Calc text score ------//
-	if 			(adc_min > TOO_LIGHT_ADC_VALUE) 				score = SCORE_TOO_LIGHT;
-	else if (adc_max < TOO_DARK_ADC_VALUE)					score = SCORE_TOO_DARK;
-	else if (accuracy_flag == A_INACCURACY)					score = SCORE_INACC;
-	else if (ff_rating <= 5)												score = SCORE_GOOD;
-	else if (ff_rating > 5 && ff_rating <= 35)			score = SCORE_NORMAL; //TODO в дефайны!
-	else if (ff_rating > 35)												score = SCORE_BAD;
-	else 																						score = SCORE_INACC;
+	if 			(adc_min > TOO_LIGHT_ADC_VALUE) 																			score = SCORE_TOO_LIGHT;
+	else if (adc_max < TOO_DARK_ADC_VALUE)																				score = SCORE_TOO_DARK;
+	else if (accuracy_flag == A_INACCURACY)																				score = SCORE_INACC;
+	else if (ff_rating <= SCORE_NORMAL_POINT)																			score = SCORE_GOOD;
+	else if (ff_rating > SCORE_NORMAL_POINT && ff_rating <= SCORE_BAD_POINT)			score = SCORE_NORMAL;
+	else if (ff_rating > SCORE_BAD_POINT)																					score = SCORE_BAD;
+	else 																																					score = SCORE_INACC;
 
 	if (score == SCORE_GOOD) 												score_color = ST7735_TFT_GREEN;
 	else if (score == SCORE_NORMAL) 								score_color = ST7735_TFT_YELLOW;
@@ -745,34 +746,39 @@ void boot_screen_render() {
 void calibration_help_render() {
 	uint8_t counter = G_cal_help_counter++; //local counter value before increment
 
-	framebuffer.fillScreen(ST7735_TFT_BLACK);
-	framebuffer.setCursor(0, 10);
-	framebuffer.setTextColor(ST7735_TFT_WHITE);
-	framebuffer.setTextSize(1);
-	framebuffer.println(utf8rus("Во время калибровки"));
-	framebuffer.println(utf8rus("не направляйте"));
-	framebuffer.println(utf8rus("устройство на"));
-	framebuffer.println(utf8rus("измеряемую лампу"));
-
-	//framebuffer.println(utf8rus("ЭТОТ КОРАБЛЬ ЕСТЬ "));
-	//framebuffer.println(utf8rus("ОПТИМИЗМ ЦЕНТРА "));
-	//framebuffer.println(utf8rus("ПЕРСОНЫ КОРАБЛЯ"));
-  //framebuffer.println(utf8rus("ВЫ НЕ УДАРИЛИ НАС"));
-  //framebuffer.println(utf8rus("СЛЕДОВАТЕЛЬНО ВЫ "));
-	//framebuffer.println(utf8rus("ЕДИТЕ МЛАДЕНЦЕВ"));
-
 	uint8_t text_pixel_diff = 8;
 	if (counter <= text_pixel_diff) G_cal_help_text_y++;
 	if (counter >= text_pixel_diff) G_cal_help_text_y--;
 	if (G_cal_help_counter > text_pixel_diff*2) G_cal_help_counter = 0;
 
-	framebuffer.setCursor(0, G_cal_help_text_y);
-	//framebuffer.println(utf8rus("ЧТО НАШЕ ТО ВАШЕ,"));
-  //framebuffer.println(utf8rus("ЧТО ВАШЕ ТО НАШЕ"));
-	framebuffer.println(utf8rus("Нажмите кнопку один"));
-	framebuffer.println(utf8rus("раз для калибровки"));
-	framebuffer.println(utf8rus("или удерживайте для "));
-	framebuffer.println(utf8rus("пропуска  --->"));
+	draw_asset(&cal_help_screen, 0, 0);
+	draw_asset(&cal_help_screen_msg, 0, G_cal_help_text_y);
+
+	//framebuffer.fillScreen(ST7735_TFT_BLACK);
+	//framebuffer.setCursor(0, 10);
+	//framebuffer.setTextColor(ST7735_TFT_WHITE);
+	//framebuffer.setTextSize(1);
+	//framebuffer.println(utf8rus("Во время калибровки"));
+	//framebuffer.println(utf8rus("не направляйте"));
+	//framebuffer.println(utf8rus("устройство на"));
+	//framebuffer.println(utf8rus("измеряемую лампу"));
+//
+	////framebuffer.println(utf8rus("ЭТОТ КОРАБЛЬ ЕСТЬ "));
+	////framebuffer.println(utf8rus("ОПТИМИЗМ ЦЕНТРА "));
+	////framebuffer.println(utf8rus("ПЕРСОНЫ КОРАБЛЯ"));
+  ////framebuffer.println(utf8rus("ВЫ НЕ УДАРИЛИ НАС"));
+  ////framebuffer.println(utf8rus("СЛЕДОВАТЕЛЬНО ВЫ "));
+	////framebuffer.println(utf8rus("ЕДИТЕ МЛАДЕНЦЕВ"));
+//
+//
+//
+	//framebuffer.setCursor(0, G_cal_help_text_y);
+	////framebuffer.println(utf8rus("ЧТО НАШЕ ТО ВАШЕ,"));
+  ////framebuffer.println(utf8rus("ЧТО ВАШЕ ТО НАШЕ"));
+	//framebuffer.println(utf8rus("Нажмите кнопку один"));
+	//framebuffer.println(utf8rus("раз для калибровки"));
+	//framebuffer.println(utf8rus("или удерживайте для "));
+	//framebuffer.println(utf8rus("пропуска  --->"));
 
 
 	framebuffer.display();
