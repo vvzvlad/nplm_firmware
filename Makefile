@@ -1,4 +1,4 @@
-main: build upload_fast miniterm git_commit
+main: assets_convert build upload_fast miniterm git_commit
 
 #fqbn:
 #1) "--fqbn", not "-fqbn"
@@ -25,7 +25,7 @@ upload_fast:
 git_commit:
 	git add . > /dev/null 2>&1
 	git commit -m "Auto(build ok): `date +'%Y-%m-%d %H:%M:%S'`"  > /dev/null 2>&1
-	git remote | xargs -L1 git push --all & > /dev/null 2>&1
+	git remote | xargs -L1 git push --all > /dev/null 2>&1 &
 
 git_commit_wait:
 	@echo "-----> Press enter for NOT git commit & push within 4 seconds <-----"
@@ -39,7 +39,8 @@ exeption_decode:
 	@cat > ./bin/trace.tmp && echo "\n\n" && java -jar ./common/EspStackTraceDecoder.jar ~/Library/Arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.0.4-gcc10.3-1757bed/bin/xtensa-lx106-elf-addr2line ./bin/npml1.ino.elf ./bin/trace.tmp ; rm ./bin/trace.tmp
 
 assets_convert:
-	@python3 ./common/rgb565_converter.py --input ./assets --output ./libraries/assets/images.h
+	@echo "Convert assets..."
+	@python3 ./common/rgb565_converter.py --input ./assets --output ./libraries/assets/images.h  > /dev/null 2>&1
 
 clean:
 	arduino-cli cache clean
