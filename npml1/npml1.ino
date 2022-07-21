@@ -962,7 +962,7 @@ void button_holded_handler() { //A long press to turn device off
 //----------System functions----------//
 
 void power_process() {
-	G_time_without_buttons_ms = 0 G_time_without_buttons_ms+100;
+	G_time_without_buttons_ms = G_time_without_buttons_ms+100; //power_process runs every 100ms
 
 	if (G_time_without_buttons_ms/1000 > AUTOPOWEROFF_TIME_S){
 		Serial.print(F("Auto timer shutdown\n"));
@@ -1090,6 +1090,8 @@ void term_data_print() {
 	Serial.println((String)F("Free FLASH: \t\t\t")+ESP.getFreeSketchSpace()/1024+F(" kbytes"));
 	Serial.println((String)F("Free RAM: \t\t\t")+system_get_free_heap_size()+F(" bytes"));
 	Serial.println((String)F("Free RAM (min): \t\t")+G_min_free_mem+F(" bytes"));
+
+	Serial.println((String)F("Time without buttons press: \t")+G_time_without_buttons_ms/1000+F(" s"));
 
 //getResetReason
 //getResetInfo
