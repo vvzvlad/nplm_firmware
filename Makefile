@@ -8,7 +8,11 @@ main: build upload_fast miniterm git_commit_wait
 
 build:
 	@echo "Compile..."
-	@arduino-cli compile --libraries ./libraries --fqbn=esp8266:esp8266:generic:xtal=80,baud=921600 npml1 --output-dir ./bin
+	@arduino-cli compile --libraries ./libraries --fqbn=esp8266:esp8266:generic:xtal=80,baud=921600,mmu=4816,eesz=16M14M,stacksmash=enabled npml1 --output-dir ./bin
+
+build_verbose:
+	@echo "Compile..."
+	@arduino-cli compile --verbose --libraries ./libraries --fqbn=esp8266:esp8266:generic:xtal=80,baud=921600,mmu=4816,eesz=16M14M,stacksmash=enabled npml1 --output-dir ./bin
 
 upload:
 	@echo "Upload ./bin/npml1.ino.bin..."

@@ -1,5 +1,6 @@
 #include "nplm1.h"
 #include <ESP8266WiFi.h>
+#include <Esp.h>
 
 #include <SPI.h>    								// Core SPI library for display
 #include <Adafruit_GFX.h>    				// Core graphics library
@@ -17,18 +18,21 @@
 
 #include <GyverFilters.h>						// Filters library
 #include <GyverLBUF.h>							// Buffer library
-//#include <EEManager.h>							// EEPROM library
 #include <EEPROM.h>
 #include <ErriezSerialTerminal.h>		// Console library
 
+#include <ArduinoOTA.h>
+#include <ESP8266httpUpdate.h>
 
 //Debug: Serial.println(__LINE__);
 // Serial.print((String)__LINE__+": "+target_app+"\n");
 
 #define ST7735_TFT_CS         	4 		//D2  //белый https://cdn.compacttool.ru/images/docs/Wemos_D1_mini_pinout.jpg
-#define ST7735_TFT_RST        	-1  	//желтый
+#define ST7735_TFT_RST        	-1  				//желтый
 #define ST7735_TFT_DC         	5 		//D1  //синий
-#define BUTTON_PIN         			16
+#define ST7735_TFT_BACKLIGHT    12    //D6
+#define BUTTON_GPIO         		15    //D8
+#define ENABLE_GPIO         		16    //D0
 
 //Screen resolution
 #define ST7735_TFT_WIDTH 				128
@@ -77,7 +81,7 @@ typedef Adafruit_ST7735 display_t;
 typedef Adafruit_GFX_Buffer<display_t> GFXBuffer_t;
 GFXBuffer_t framebuffer = GFXBuffer_t(ST7735_TFT_WIDTH, ST7735_TFT_HEIGHT, display_t(ST7735_TFT_CS, ST7735_TFT_DC, ST7735_TFT_RST));
 BH1750FVI LightSensor(BH1750FVI::k_DevModeContLowRes);
-EncButton<EB_CALLBACK, BUTTON_PIN> btn(INPUT);
+EncButton<EB_CALLBACK, BUTTON_GPIO> btn(INPUT);
 TickerScheduler ts(TS_MAX);
 SerialTerminal term('\n', ' '); //new line character(\n), delimiter character(space)
 
@@ -86,7 +90,7 @@ GMedian<5, uint16_t> flicker_freq_filter;
 GMedian<5, uint16_t> cal_filter;
 GKalman luminance_lx_filter(3, 0.3);
 GKalman luminance_arrow_diff_filter(3, 0.3);
-GKalman flicker_simple_filter(3, 0.3);
+GKalman flicker_simple_filter(3, 0.3); //TODO тоже бы в eeprom
 GKalman flicker_gost_filter(3, 0.3);
 GyverLBUF<uint8_t, 6> flicker_accuracy_buf;
 GyverLBUF<uint8_t, 128> lum_graph_buf_log;
@@ -98,7 +102,7 @@ volatile uint8_t G_flicker_simple = 0;
 volatile uint16_t G_flicker_freq = 0;
 volatile uint16_t G_adc_values_max = 1;
 volatile uint16_t G_adc_values_min = MAX_ADC_VALUE;
-volatile uint8_t G_graph_values[GRAPH_WIDTH] = {};
+volatile uint16_t G_adc_values[MEASURE_NUM_SAMPLES] = {};
 volatile uint32_t G_min_free_mem = 1000*1000*1000;
 volatile uint8_t G_boot_run_counter = 0;
 volatile uint8_t G_cal_run_counter = 0;
@@ -106,18 +110,15 @@ volatile uint8_t G_shutdown_run_counter = 0;
 volatile uint8_t G_cal_help_counter = 0;
 volatile uint8_t G_cal_help_text_y = 100;
 
-
-
-
 volatile uint16_t G_luminance = 0;
 volatile uint16_t G_eeprom_luminance_normal_point = LUMINANCE_NORMAL;
 volatile uint16_t G_eeprom_luminance_good_point = LUMINANCE_GOOD;
 
 //EEPROM data mirror in global variables
 volatile APPS G_eeprom_last_app = APP_UNKNOWN;
-volatile FLAG G_eeprom_calibration = FLAG_ACTIVE;
+volatile FLAG G_eeprom_calibration = F_ACTIVE;
 
-volatile FLAG G_flag_first_run = FLAG_ACTIVE;
+volatile FLAG G_flag_first_run = F_ACTIVE;
 volatile APPS G_app_runned = APP_UNKNOWN;
 volatile APPS G_app_previous = APP_UNKNOWN;
 volatile APPS G_last_app_runned = APP_UNKNOWN;
@@ -140,40 +141,40 @@ uint16_t adc_value_measure() {
 
 
 
-uint16_t frequency_calc(uint16_t *adc_values_array, uint16_t adc_values_min_max_mean, uint32_t catch_time_us) {
+uint16_t frequency_calc(uint16_t adc_values_min_max_mean, uint32_t catch_time_us) {
 	uint16_t adc_mean_values[MEASURE_NUM_SAMPLES] = {};
 	uint16_t adc_mean_values_i = 0;
 
-	uint16_t acc=0;
-	FLAG not_found_flag = FLAG_INACTIVE;
+	uint16_t accumulator = 0;
+	FLAG not_sync = F_INACTIVE;
 
-	while(not_found_flag == FLAG_INACTIVE) {
-		not_found_flag=FLAG_ACTIVE;
-		for (uint16_t i=acc; i<MEASURE_NUM_SAMPLES; i++) {
-			if (adc_values_array[i] > adc_values_min_max_mean)
+	while(not_sync == F_INACTIVE) {
+		not_sync = F_ACTIVE;
+		for (uint16_t i=accumulator; i<MEASURE_NUM_SAMPLES; i++) {
+			if (G_adc_values[i] > adc_values_min_max_mean)
 			{
-				//Serial.println((String)"i:"+i+", adc_values_array:"+adc_values_array[i]);
+				//Serial.println((String)"i:"+i+", G_adc_values:"+G_adc_values[i]);
 				//framebuffer.drawLine(i/GRAPH_WIDTH_DIVIDER, 110, i/GRAPH_WIDTH_DIVIDER, 160, ST7735_TFT_CYAN);
 				//framebuffer.display();
-				acc = i+20;
-				not_found_flag = FLAG_INACTIVE;
+				accumulator = i + 20;
+				not_sync = F_INACTIVE;
 				break;
 			}
 		}
 
-		for (uint16_t i=acc; i<MEASURE_NUM_SAMPLES; i++) {
-			if (not_found_flag == FLAG_ACTIVE) break;
-			else not_found_flag == FLAG_ACTIVE;
+		for (uint16_t i=accumulator; i<MEASURE_NUM_SAMPLES; i++) {
+			if (not_sync == F_ACTIVE) break;
+			else not_sync == F_ACTIVE;
 
-			if (adc_values_array[i] < adc_values_min_max_mean)
+			if (G_adc_values[i] < adc_values_min_max_mean)
 			{
 				//framebuffer.drawLine(i/GRAPH_WIDTH_DIVIDER, 110, i/GRAPH_WIDTH_DIVIDER, 160, ST7735_TFT_CYAN);
-				//Serial.println((String)"i:"+i+", adc_values_array:"+adc_values_array[i]);
+				//Serial.println((String)"i:"+i+", G_adc_values:"+G_adc_values[i]);
 				//framebuffer.display();
 				adc_mean_values[adc_mean_values_i] = i;
 				adc_mean_values_i++;
-				acc = i+20;
-				not_found_flag = FLAG_INACTIVE;
+				accumulator = i + 20;
+				not_sync = F_INACTIVE;
 				break;
 			}
 		}
@@ -202,25 +203,14 @@ uint16_t frequency_calc(uint16_t *adc_values_array, uint16_t adc_values_min_max_
 	uint16_t period_time_us = sample_time_us*adc_mean_values_distances_mean;
 	float freq = (float)1000000/period_time_us;
 
-	if (freq > 2000) freq = 0;
-
-	//Serial.print("period_time_us:");
-	//Serial.print(period_time_us);
-
-	//Debug output for frequency counting
-	//Serial.print("adc_mean_values:\n");
-	//for (uint16_t i=0; i<50; i++) {
-	//	Serial.print(adc_mean_values[i]);
-	//	Serial.print("NN");
-	//}
-	//Serial.print("\n");
+	if (freq > 800) freq = 0;
 
 	free_mem_calc();
 	return (uint16_t)freq;
 }
 
 void flicker_measure() {
-	uint16_t adc_values[MEASURE_NUM_SAMPLES] = {};
+
 	uint16_t adc_values_max = 1; //inital value 1 to prevent division by zero if we get zeros in the measurement (or after applying the correction).
 	uint16_t adc_values_min = MAX_ADC_VALUE;
 	uint16_t adc_values_avg = 0;
@@ -254,7 +244,7 @@ void flicker_measure() {
 	//The measurement itself
 	catch_start_time = micros();
 	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-		adc_values[i] = system_adc_read();
+		G_adc_values[i] = system_adc_read();
 	}
 	catch_stop_time = micros();
 	catch_time_us = catch_stop_time-catch_start_time;
@@ -266,24 +256,24 @@ void flicker_measure() {
 	system_soft_wdt_restart();
 
 	//Debug output of the measurement buffer
-	//Serial.print("adc_values:\n");
+	//Serial.print("G_adc_values:\n");
 	//for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-	//	Serial.print(adc_values[i]);
+	//	Serial.print(G_adc_values[i]);
 	//	Serial.print("NN");
 	//}
 	//Serial.print("\n");
 
 	//Applying Correction
 	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-		if 		(adc_values[i] <= G_adc_correction) { adc_values[i] = 0;  }
-		else 																			{ adc_values[i] = adc_values[i] - G_adc_correction; }
+		if 		(G_adc_values[i] <= G_adc_correction) { G_adc_values[i] = 0;  }
+		else 																			{ G_adc_values[i] = G_adc_values[i] - G_adc_correction; }
 	}
 
 	//Calculating the maximum, minimum, average, average between the maximum and minimum values (for frequency measure)
 	for (uint16_t i=0; i<MEASURE_NUM_SAMPLES; i++) {
-		if (adc_values[i] > adc_values_max) {adc_values_max = adc_values[i];}
-		if (adc_values[i] < adc_values_min) {adc_values_min = adc_values[i];}
-		adc_values_sum = adc_values_sum + adc_values[i];
+		if (G_adc_values[i] > adc_values_max) {adc_values_max = G_adc_values[i];}
+		if (G_adc_values[i] < adc_values_min) {adc_values_min = G_adc_values[i];}
+		adc_values_sum = adc_values_sum + G_adc_values[i];
 	}
 	adc_values_avg = adc_values_sum/MEASURE_NUM_SAMPLES;
 	adc_values_min_max_mean = (adc_values_max-adc_values_min)/2+adc_values_min;
@@ -304,52 +294,18 @@ void flicker_measure() {
 	if (flicker_simple < 0) flicker_simple_uint = 0;
 	if (flicker_simple >= 0 && flicker_simple <= 255) flicker_simple_uint = (uint8_t)flicker_simple;
 
-	//flicker_gost_uint = (uint8_t)flicker_gost; //todo удалить
-	//flicker_simple_uint = (uint8_t)flicker_simple;
-
 	//Flicker frequency calculation
 	uint16_t freq = 0;
-	if (flicker_simple > NO_FREQ_FLICKER_VALUE) 	freq = frequency_calc(adc_values, adc_values_min_max_mean, catch_time_us);
+	if (flicker_simple > NO_FREQ_FLICKER_VALUE) 	freq = frequency_calc(adc_values_min_max_mean, catch_time_us);
 	else																					freq = 0; //At low flicker level the frequency count is wrong and strobes
+
 
 	G_flicker_gost = flicker_gost_filter.filtered((int)flicker_gost_uint);
 	G_flicker_simple = flicker_simple_filter.filtered((int)flicker_simple_uint);
-
 	G_flicker_freq = flicker_freq_filter.filtered(freq);
 	G_adc_values_max = adc_values_max;
 	G_adc_values_min = adc_values_min;
 
-
-	//Graph data
-	uint8_t adc_values_multiplier = 0;
-
-	adc_values_max = adc_values_max/100*10+adc_values_max;
-	if (adc_values_max == 0) { adc_values_max = 1; };
-	adc_values_multiplier = MAX_ADC_VALUE/adc_values_max;
-
-	for (uint16_t i=0; i < GRAPH_WIDTH; i++) {
-		G_graph_values[i] = (adc_values[i*GRAPH_WIDTH_DIVIDER+0]*adc_values_multiplier+  //Take 4 values (=GRAPH_WIDTH_DIVIDER)
-																	adc_values[i*GRAPH_WIDTH_DIVIDER+1]*adc_values_multiplier+ //from the adc values array at a time
-																	adc_values[i*GRAPH_WIDTH_DIVIDER+2]*adc_values_multiplier+ //and collapse them into one
-																	adc_values[i*GRAPH_WIDTH_DIVIDER+3]*adc_values_multiplier)
-																	/GRAPH_WIDTH_DIVIDER/GRAPH_HEIGHT_DIVIDER;
-		if (G_graph_values[i] > 50) { G_graph_values[i] = 50; }
-	}
-
-
-	//debug prints
-	//Serial.print("Avg:");
-	//Serial.print(adc_values_avg);
-	//Serial.print(", Max:");
-	//Serial.print(adc_values_max);
-	//Serial.print(", min:");
-	//Serial.print(adc_values_min);
-	//Serial.print(", correction:");
-	//Serial.print(G_adc_correction);
-	//Serial.print(", flicker_gost:");
-	//Serial.print(flicker_gost);
-	//Serial.print(", flicker_simple:");
-	//Serial.print(flicker_simple);
 	free_mem_calc();
 }
 
@@ -369,15 +325,14 @@ void luminance_measure() {
 
 //----------Switch app function----------//
 
-
 void change_app(APPS target_app){
 	if (G_app_runned == target_app) {return;}
 
 	if (target_app == APP_FLICKER_SIMPLE || target_app == APP_FLICKER_GOST || target_app == APP_LIGHT) {
 		EEPROM.put(EEPROM_LAST_APP, target_app); EEPROM.commit();
-		if (G_eeprom_last_app != APP_UNKNOWN && G_flag_first_run == FLAG_ACTIVE) {
+		if (G_eeprom_last_app != APP_UNKNOWN && G_flag_first_run == F_ACTIVE) {
 			target_app = G_eeprom_last_app;
-			G_flag_first_run = FLAG_INACTIVE;
+			G_flag_first_run = F_INACTIVE;
 		}
 	}
 
@@ -482,6 +437,7 @@ void luminance_render() {
 	if 			(luminance_lx >= 0 && luminance_lx <= normal_p)				score = SCORE_BAD;
 	else if (luminance_lx > normal_p && luminance_lx <= good_p)		score = SCORE_NORMAL;
 	else if (luminance_lx > good_p)																score = SCORE_GOOD;
+	else 																													score = SCORE_GOOD;
 
 	//Drawing the labels "good light", "dark lamp"
 	if 			(score == SCORE_GOOD) 													draw_asset(&light_msg_good, 0, 0);
@@ -500,10 +456,10 @@ void luminance_render() {
 	//------ Draw lux text ------//
 	framebuffer.setFont(&verdana_bold12pt7b); //LARGE text font
 	framebuffer.setTextSize(0);
-	String lx_value;
+	String lx_screen_text;
 
-	if 			(luminance_lx < 1000)			lx_value = (String)(luminance_lx)+			 " lx";
-	else if (luminance_lx >= 1000) 		lx_value = (String)(luminance_lx/1000)+" klx";
+	if 			(luminance_lx < 1000)			lx_screen_text = (String)(luminance_lx)+			 " lx";
+	else if (luminance_lx >= 1000) 		lx_screen_text = (String)(luminance_lx/1000)+" klx";
 
 	if 			(score == SCORE_GOOD)			score_color = ST7735_TFT_GREEN;
 	else if (score == SCORE_NORMAL)		score_color = ST7735_TFT_YELLOW;
@@ -514,7 +470,7 @@ void luminance_render() {
 	int16_t text_start_x, text_start_y; //not used
 	uint16_t text_width, text_height;
 
-	framebuffer.getTextBounds(lx_value,  			 //Fucking magic to
+	framebuffer.getTextBounds(lx_screen_text,  	 //Fucking magic to
 														cursor_x,					 //align text horizontally.
 														cursor_y,
 														&text_start_x,
@@ -526,7 +482,7 @@ void luminance_render() {
 	cursor_x = (ST7735_TFT_WIDTH-text_width)/2;
 	framebuffer.setTextColor(score_color);
 	framebuffer.setCursor(cursor_x, cursor_y);
-	framebuffer.print(lx_value);
+	framebuffer.print(lx_screen_text);
 	framebuffer.setFont(); //Reset LARGE text font to the default
 
 
@@ -580,10 +536,72 @@ void luminance_render() {
 	}
 
 	framebuffer.display();
+	digitalWrite(ST7735_TFT_BACKLIGHT, HIGH); //backlight on
 	free_mem_calc();
 }
 
+void ota_progress_callback(int cur, int total) {
+	uint8_t percent = (uint8_t)((float)cur/(float)total*100);
 
+	Serial.printf("OTA progress: %d%%\n", percent);
+	Serial.printf("CALLBACK:  HTTP update process at %d of %d bytes...\n", cur, total);
+}
+
+
+void ota_update() {
+	Serial.printf("Wi-Fi mode set to WIFI_STA %s\n", WiFi.mode(WIFI_STA) ? "" : "Failed!");
+
+  WiFi.begin("IoT_Dobbi", "canned-ways-incense");
+	while (WiFi.status() != WL_CONNECTED)
+  {
+    switch ( WiFi.status() ) {
+			case 0: Serial.print(F("Status 0: WL_IDLE_STATUS (Wi-Fi is in process of changing between statuses)\n")); break;
+			case 1: Serial.print(F("Status 1: WL_NO_SSID_AVAIL (no Wi-Fi network is available)\n")); break;
+			case 2: Serial.print(F("Status 2: WL_SCAN_COMPLETED (scan is completed)\n")); break;
+			case 3: Serial.print(F("Status 3: WL_CONNECTED (connection is established)\n")); break;
+			case 4: Serial.print(F("Status 4: WL_CONNECT_FAILED (connection failed)\n")); break;
+			case 5: Serial.print(F("Status 5: WL_CONNECTION_LOST (connection is lost)\n")); break;
+			case 6: Serial.print(F("Status 6: WL_CONNECT_WRONG_PASSWORD (password is incorrect)")); break;
+			case 7: Serial.print(F("Status 7: WL_DISCONNECTED (module is in progress connection, or not configured in station mode)\n")); break;
+		}
+		delay(1000);
+  }
+  Serial.print(F("Status 3: WL_CONNECTED (connection is established)"));
+
+  Serial.print("Connected, IP address: ");
+  Serial.println(WiFi.localIP());
+	WiFi.printDiag(Serial);
+
+	Serial.println("Starting OTA update...");
+
+
+
+	WiFiClient client;
+	ESPhttpUpdate.onProgress(ota_progress_callback);
+
+	ESPhttpUpdate.update(client, "192.168.88.69", 8080, "/firmware_nplm.bin");
+	free_mem_calc();
+	}
+
+void mem_test_2 (uint32_t count) {
+	count = count + 100;
+	volatile uint8_t test[100];
+	for (uint8_t i=0; i<100; i++) {
+		test[i] = 0xFF;
+	}
+	Serial.print("Free heap size: ");
+	Serial.print(system_get_free_heap_size());
+	Serial.print(" bytes, busy ");
+	Serial.print(count);
+	Serial.print(" bytes\n");
+	delay(200);
+	mem_test_2(count);
+	mem_test_2(count);
+}
+
+void mem_test() {
+	mem_test_2(0);
+}
 
 void flicker_render() {
 	uint8_t flicker;
@@ -595,11 +613,12 @@ void flicker_render() {
 	uint16_t score_color;
 	SCORE score;
 
+
 	if (G_F_type == FT_SIMPLE) 	flicker = G_flicker_simple;
 	if (G_F_type == FT_GOST) 		flicker = G_flicker_gost;
 
 	//------ Calc combined FF rating ------ //FF = Flicker + Freq, combined rating for total lamp score, abstract percent
-	if 			(freq >= 0 && freq <= NO_FLICKER_FREQ_VALUE-50) 											ff_rating = flicker;
+	if 			(freq <= NO_FLICKER_FREQ_VALUE-50) 																		ff_rating = flicker;
 	else if (freq > NO_FLICKER_FREQ_VALUE-50 && freq <= NO_FLICKER_FREQ_VALUE) 		ff_rating = flicker*(float)(((50-(freq-(NO_FLICKER_FREQ_VALUE-50))))/50);
 	else if (freq > NO_FLICKER_FREQ_VALUE) 																				ff_rating = 0;
 	else 																																					ff_rating = 666;
@@ -624,16 +643,18 @@ void flicker_render() {
 	if 			(adc_min > TOO_LIGHT_ADC_VALUE) 				score = SCORE_TOO_LIGHT;
 	else if (adc_max < TOO_DARK_ADC_VALUE)					score = SCORE_TOO_DARK;
 	else if (accuracy_flag == A_INACCURACY)					score = SCORE_INACC;
-	else if (ff_rating >= 0 && ff_rating <= 5)			score = SCORE_GOOD;
+	else if (ff_rating <= 5)												score = SCORE_GOOD;
 	else if (ff_rating > 5 && ff_rating <= 35)			score = SCORE_NORMAL; //TODO в дефайны!
 	else if (ff_rating > 35)												score = SCORE_BAD;
+	else 																						score = SCORE_INACC;
 
-	if (score == SCORE_GOOD) 				score_color = ST7735_TFT_GREEN;
-	if (score == SCORE_NORMAL) 			score_color = ST7735_TFT_YELLOW;
-	if (score == SCORE_BAD) 				score_color = ST7735_TFT_RED;
-	if (score == SCORE_TOO_LIGHT) 	score_color = ST7735_TFT_GRAY;
-	if (score == SCORE_TOO_DARK) 		score_color = ST7735_TFT_GRAY;
-	if (score == SCORE_INACC) 			score_color = ST7735_TFT_GRAY;
+	if (score == SCORE_GOOD) 												score_color = ST7735_TFT_GREEN;
+	else if (score == SCORE_NORMAL) 								score_color = ST7735_TFT_YELLOW;
+	else if (score == SCORE_BAD) 										score_color = ST7735_TFT_RED;
+	else if (score == SCORE_TOO_LIGHT) 							score_color = ST7735_TFT_GRAY;
+	else if (score == SCORE_TOO_DARK) 							score_color = ST7735_TFT_GRAY;
+	else if (score == SCORE_INACC) 									score_color = ST7735_TFT_GRAY;
+	else 																						score_color = ST7735_TFT_GRAY;
 
 
 
@@ -692,7 +713,23 @@ void flicker_render() {
 
 
 
+	//------ Graph calc ------//
+	uint8_t adc_values_multiplier = 0;
+	uint8_t graph_values[GRAPH_WIDTH] = {};
+	int16_t adc_values_max = G_adc_values_max;
 
+	adc_values_max = adc_values_max/100*10+adc_values_max;
+	if (adc_values_max == 0) { adc_values_max = 1; };
+	adc_values_multiplier = MAX_ADC_VALUE/adc_values_max;
+
+	for (uint16_t i=0; i < GRAPH_WIDTH; i++) {
+		graph_values[i] = ( G_adc_values[i*GRAPH_WIDTH_DIVIDER+0]*adc_values_multiplier+  //Take 4 values (=GRAPH_WIDTH_DIVIDER)
+													G_adc_values[i*GRAPH_WIDTH_DIVIDER+1]*adc_values_multiplier+ //from the adc values array at a time
+													G_adc_values[i*GRAPH_WIDTH_DIVIDER+2]*adc_values_multiplier+ //and collapse them into one
+													G_adc_values[i*GRAPH_WIDTH_DIVIDER+3]*adc_values_multiplier)
+														/GRAPH_WIDTH_DIVIDER/GRAPH_HEIGHT_DIVIDER;
+		if (graph_values[i] > 50) { graph_values[i] = 50; }
+	}
 
 
 
@@ -741,14 +778,14 @@ void flicker_render() {
 	for (uint8_t current_colon = GRAPH_X; current_colon < GRAPH_WIDTH; current_colon++) {
 		if (current_colon == 0) {
 			framebuffer.drawPixel(current_colon, //The first point is drawn as a pixel because it has no past point
-										ST7735_TFT_HEIGHT-G_graph_values[current_colon],
+										ST7735_TFT_HEIGHT-graph_values[current_colon],
 										score_color);
 		}
 		else {
 			framebuffer.drawLine(current_colon-1,  //The following points are drawn as lines to prevent gaps between individual points on steep hillsides
-										ST7735_TFT_HEIGHT-G_graph_values[current_colon-1],
+										ST7735_TFT_HEIGHT-graph_values[current_colon-1],
 										current_colon,
-										ST7735_TFT_HEIGHT-G_graph_values[current_colon],
+										ST7735_TFT_HEIGHT-graph_values[current_colon],
 										score_color);
 		}
 	}
@@ -768,6 +805,7 @@ void flicker_render() {
 
 	//------ Transfer image to display ------
 	framebuffer.display();
+	digitalWrite(ST7735_TFT_BACKLIGHT, HIGH); //backlight on
 	free_mem_calc();
 }
 
@@ -785,6 +823,7 @@ void boot_screen_render() {
 		else if (counter > 5) 	framebuffer.print(F(".."));
 		else if (counter > 2) 	framebuffer.print(F("."));
 		framebuffer.display();
+		digitalWrite(ST7735_TFT_BACKLIGHT, HIGH); //backlight on
 	}
 	else {
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
@@ -828,6 +867,7 @@ void calibration_help_render() {
 
 
 	framebuffer.display();
+	digitalWrite(ST7735_TFT_BACKLIGHT, HIGH); //backlight on
 	free_mem_calc();
 }
 
@@ -847,6 +887,7 @@ void calibration_measure_render() {
 		framebuffer.setCursor(10, 120);
 		framebuffer.print((String)"Value:"+G_adc_correction+" adc p.");
 		framebuffer.display();
+		digitalWrite(ST7735_TFT_BACKLIGHT, HIGH); //backlight on
 	}
 	else {
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
@@ -892,7 +933,12 @@ void shutdown_screen_render() {
 
 	framebuffer.fillRoundRect(15, 74, 128-15-15, 5, 2, 0xe5b6);
 	framebuffer.fillRoundRect(15, 74, counter*2.5, 5, 2, 0x6904);
-	if (counter*2.5 > 128-15-15) ESP.restart(); //reboot
+	if (counter*2.5 > 128-15-15){
+		ts.disableAll();
+		digitalWrite(ST7735_TFT_BACKLIGHT, LOW); //backlight off
+		//digitalWrite(ENABLE_GPIO, LOW); //porew off
+		//ESP.restart(); //reboot
+	}
 
 	if (btn.state() == 0) {
 		G_shutdown_run_counter = 0;
@@ -934,10 +980,10 @@ void isr() {
 void term_calibration_enable_disable() {
 	char *arg = term.getNext();
 	if (arg != NULL && strcmp(arg, "enable") == 0) {
-		EEPROM.put(EEPROM_CALIBRATION_ACTIVE, FLAG_ACTIVE); EEPROM.commit();
+		EEPROM.put(EEPROM_CALIBRATION_ACTIVE, F_ACTIVE); EEPROM.commit();
 	}
 	else if (arg != NULL && strcmp(arg, "disable") == 0) {
-		EEPROM.put(EEPROM_CALIBRATION_ACTIVE, FLAG_INACTIVE); EEPROM.commit();
+		EEPROM.put(EEPROM_CALIBRATION_ACTIVE, F_INACTIVE); EEPROM.commit();
 	}
 	else term_help();
 	free_mem_calc();
@@ -963,8 +1009,8 @@ void term_eeprom_write() {
 
 void term_lum_write() {
 	char *arg;
-	uint16_t normal;
-	uint16_t good;
+	uint16_t normal = G_eeprom_luminance_normal_point;
+	uint16_t good = G_eeprom_luminance_good_point;
 	arg = term.getNext();
 	if (arg != NULL) normal = atoi(arg);
 	arg = term.getNext();
@@ -989,6 +1035,35 @@ void term_eeprom_read() {
 }
 
 void term_data_print() {
+
+	Serial.print((String)F("Chip ID: \t\t\t0x"));
+	Serial.print(system_get_chip_id(), HEX);
+	Serial.print((String)F("\n"));
+
+  Serial.println((String)F("SDK Version: \t\t\t")+system_get_sdk_version()+F(""));
+	Serial.println((String)F("CPU frequency: \t\t\t")+system_get_cpu_freq()+F(" MHz"));
+
+	Serial.print((String)F("Flash ID/Vendor ID: \t\t\t0x"));
+	Serial.print(ESP.getFlashChipId(), HEX);
+	Serial.print((String)F("/"));
+	Serial.print(ESP.getFlashChipVendorId(), HEX);
+	Serial.print((String)F("\n"));
+
+	Serial.println((String)F("Flash real size: \t\t")+ESP.getFlashChipRealSize()/1024+F(" kbytes"));
+	Serial.println((String)F("Flash size: \t\t\t")+ESP.getFlashChipSize()/1024+F(" kbytes"));
+	Serial.println((String)F("Flash size(chipid): \t\t")+ESP.getFlashChipSizeByChipId()/1024+F(" kbytes"));
+	Serial.println((String)F("Flash speed: \t\t\t")+ESP.getFlashChipSpeed()/1000/1000+F(" MHz"));
+
+	Serial.println((String)F("App size (flash): \t\t")+ESP.getSketchSize()/1024+F(" kbytes"));
+	Serial.println((String)F("Free FLASH: \t\t\t")+ESP.getFreeSketchSpace()/1024+F(" kbytes"));
+	Serial.println((String)F("Free RAM: \t\t\t")+system_get_free_heap_size()+F(" bytes"));
+	Serial.println((String)F("Free RAM (min): \t\t")+G_min_free_mem+F(" bytes"));
+
+//getResetReason
+//getResetInfo
+//eraseConfig
+
+
 	Serial.print("\n");
 	Serial.println((String)F("Flicker freq: \t\t\t")+G_flicker_freq+F(" Hz"));
 	Serial.println((String)F("Flicker (simple): \t\t")+G_flicker_simple+F(" %"));
@@ -998,8 +1073,8 @@ void term_data_print() {
 	Serial.println((String)F("ADC values min: \t\t")+G_adc_values_min+F(" adc points"));
 	Serial.println((String)F("Luminance: \t\t\t")+G_luminance+F(" lx"));
 	Serial.println((String)F("Luminance normal/good: \t\t")+G_eeprom_luminance_normal_point+"/"+G_eeprom_luminance_good_point+F(" lx"));
-	Serial.println((String)F("Free memory: \t\t\t")+system_get_free_heap_size()+F(" bytes"));
-	Serial.println((String)F("Free memory (min): \t\t")+G_min_free_mem+F(" bytes"));
+
+	Serial.print("\n");
 	Serial.println((String)F("App running: \t\t\tenum APP #")+G_app_runned+F(""));
 	Serial.println((String)F("Last app (eeprom): \t\tenum APP #")+EEPROM.read(EEPROM_LAST_APP)+F(""));
 	Serial.println((String)F("First run flag: \t\t")+G_flag_first_run+F(""));
@@ -1019,6 +1094,8 @@ void term_init()
 	term.addCommand("ewrite", term_eeprom_write);
 	term.addCommand("lum", term_lum_write);
 	term.addCommand("eread", term_eeprom_read);
+	term.addCommand("ota", ota_update);
+	term.addCommand("mem", mem_test);
 	term.addCommand("[A", term_data_print);
 	term.setPostCommandHandler(term_prompt);
 	term.setDefaultHandler(term_unknown_command);
@@ -1036,6 +1113,8 @@ void term_help()
 	Serial.println(F("  ewrite [addr] [value]			write value to eeprom at addr"));
 	Serial.println(F("  eread [addr]				read value from eeprom at addr"));
 	Serial.println(F("  erase					Erase all eeprom settings"));
+	Serial.println(F("  memtest					Filling memory before stack corruption and rebooting"));
+	Serial.println(F("  ota					Update firmware by wifi connection"));
 }
 
 void term_unknown_command(const char *command)
@@ -1096,7 +1175,13 @@ void setup(void) {
 	WiFi.forceSleepBegin(); //Disable radio module
 	Serial.print(F("Wifi disabled\n"));
 
-	//attachInterrupt(BUTTON_PIN, isr, CHANGE); //button interrupt
+	pinMode(ST7735_TFT_BACKLIGHT, OUTPUT);
+	//pinMode(ENABLE_GPIO, OUTPUT);
+
+	digitalWrite(ST7735_TFT_BACKLIGHT, LOW);
+	//digitalWrite(ENABLE_GPIO, HIGH);
+
+	//attachInterrupt(BUTTON_GPIO, isr, CHANGE); //button interrupt
 	btn.setButtonLevel(HIGH);
 	btn.setHoldTimeout(400);
 	btn.attach(CLICK_HANDLER, button_click_handler);
@@ -1114,8 +1199,8 @@ void setup(void) {
 
   framebuffer.initR(INITR_BLACKTAB);
 	framebuffer.cp437(true); //Support for сyrillic in the standard font (works with the patched glcdfont.c)
-	framebuffer.fillScreen(ST7735_TFT_BLACK);
-	framebuffer.display();
+	//framebuffer.fillScreen(ST7735_TFT_BLACK);
+	//framebuffer.display();
 	Serial.print(F("Framebuffer initialized\n"));
 
 
@@ -1131,16 +1216,14 @@ void setup(void) {
 	ts.add(TS_RENDER_SHUTDOWN, 		  60,  [&](void *) { shutdown_screen_render(); 	  	}, nullptr, false);
 	ts.add(TS_RENDER_CAL_HELP, 		  80,  [&](void *) { calibration_help_render(); 		}, nullptr, false);
 	ts.add(TS_RENDER_CAL_PROCESS,  200,  [&](void *) { calibration_measure_render(); 	}, nullptr, false);
+
 	ts.disableAll();
 	Serial.print(F("Sheduler initialized\n"));
 
 	free_mem_calc();
 
-	if (G_eeprom_calibration == FLAG_INACTIVE) {
-		change_app(APP_FLICKER_SIMPLE);
-	}
-	else change_app(APP_BOOT);
-
+	if (G_eeprom_calibration == F_INACTIVE)  change_app(APP_FLICKER_SIMPLE);
+	if (G_eeprom_calibration == F_ACTIVE)  change_app(APP_BOOT);
 
 	Serial.print(F("\n> "));
 }
@@ -1149,8 +1232,4 @@ void loop() {
   ts.update();
 	btn.tick();
 	term.readSerial();
-
-	//if (btn.click()) Serial.println("click");
-	//if (btn.held()) Serial.println("held");
-	//if (btn.hasClicks(2)) Serial.println("action 2 clicks");
 }

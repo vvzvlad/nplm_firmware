@@ -1,3 +1,5 @@
+#include <ESP8266WiFi.h>
+
 typedef enum: uint8_t {
   APP_BOOT,
 	APP_FLICKER_SIMPLE,
@@ -20,6 +22,7 @@ typedef enum: uint8_t {
 	TS_RENDER_CAL_HELP,
 	TS_RENDER_CAL_PROCESS,
 	TS_DEBUG,
+	TS_MEM_TEST,
 	TS_MAX,
 } TASKS;
 
@@ -43,8 +46,8 @@ typedef enum: uint8_t {
 } FLIKER_TYPE_CALC;
 
 typedef enum: uint8_t {
-  FLAG_INACTIVE,
-	FLAG_ACTIVE,
+  F_INACTIVE,
+	F_ACTIVE,
 } FLAG;
 
 
