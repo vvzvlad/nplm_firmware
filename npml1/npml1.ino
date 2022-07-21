@@ -1190,6 +1190,7 @@ void eeprom_clear() {
 
 void setup(void) {
 	Serial.begin(115200);
+	delay(50);
   Serial.print(F("\n\nNPLM-1 Start\n"));
 
 	WiFi.persistent(false); //Disable wifi settings recording in flash
