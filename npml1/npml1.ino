@@ -107,6 +107,8 @@ volatile uint32_t G_min_free_mem = 1000*1000*1000;
 volatile uint8_t G_boot_run_counter = 0;
 volatile uint8_t G_cal_run_counter = 0;
 volatile uint8_t G_shutdown_run_counter = 0;
+volatile uint8_t G_power_run_counter = 0;
+
 volatile uint8_t G_cal_help_counter = 0;
 volatile uint8_t G_cal_help_text_y = 100;
 
@@ -122,6 +124,7 @@ volatile FLAG G_flag_first_run = F_ACTIVE;
 volatile APPS G_app_runned = APP_UNKNOWN;
 volatile APPS G_app_previous = APP_UNKNOWN;
 volatile APPS G_last_app_runned = APP_UNKNOWN;
+volatile FLAG G_power_flag = F_ACTIVE;
 
 volatile FLIKER_TYPE_CALC G_F_type = FT_SIMPLE;
 
@@ -341,6 +344,7 @@ void change_app(APPS target_app){
 	ts.disableAll();
 	ts.enable(TS_MEASURE_FLICKER); //To quickly update the values when switching
 	ts.enable(TS_MEASURE_LIGHT);   //applications, the metering processes is always on
+	ts.enable(TS_POWER);   				 //This process is always on
 
 	if (target_app == APP_FLICKER_SIMPLE) {
 		G_F_type = FT_SIMPLE;
@@ -812,6 +816,10 @@ void flicker_render() {
 void boot_screen_render() {
 	uint8_t counter = G_boot_run_counter++; //local counter value before increment
 
+	if (counter > 1){ // 200ms*10cycles=2000ms
+		digitalWrite(ST7735_TFT_BACKLIGHT, HIGH); //backlight on
+	}
+
 	if (counter < 10){ // 200ms*10cycles=2000ms
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
 		draw_asset(&boot_screen, 0, 0);
@@ -823,7 +831,7 @@ void boot_screen_render() {
 		else if (counter > 5) 	framebuffer.print(F(".."));
 		else if (counter > 2) 	framebuffer.print(F("."));
 		framebuffer.display();
-		digitalWrite(ST7735_TFT_BACKLIGHT, HIGH); //backlight on
+
 	}
 	else {
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
@@ -932,12 +940,9 @@ void shutdown_screen_render() {
 	framebuffer.println(utf8rus("выключения"));
 
 	framebuffer.fillRoundRect(15, 74, 128-15-15, 5, 2, 0xe5b6);
-	framebuffer.fillRoundRect(15, 74, counter*2.5, 5, 2, 0x6904);
-	if (counter*2.5 > 128-15-15){
-		ts.disableAll();
-		digitalWrite(ST7735_TFT_BACKLIGHT, LOW); //backlight off
-		//digitalWrite(ENABLE_GPIO, LOW); //porew off
-		//ESP.restart(); //reboot
+	framebuffer.fillRoundRect(15, 74, counter*3.5, 5, 2, 0x6904);
+	if (counter*3.5 > 128-15-15){
+		G_power_flag = F_INACTIVE;
 	}
 
 	if (btn.state() == 0) {
@@ -956,6 +961,25 @@ void shutdown_screen_render() {
 
 //----------System functions----------//
 
+void power_process() {
+	if (G_power_flag == F_ACTIVE){
+		if (G_power_run_counter > 0) {
+			digitalWrite(ST7735_TFT_BACKLIGHT, HIGH); 	//Turn on the backlight with a delay so that the screen does not show transients and initialization
+		}
+		digitalWrite(ENABLE_GPIO, HIGH); 						//After booting up the system, maintain the high level on the ENABLE LDO by itself
+																								//(when turned on, the high level appears because the user pressed the button)
+	}
+
+	if (G_power_flag == F_INACTIVE){
+		digitalWrite(ST7735_TFT_BACKLIGHT, LOW); 											//Turn off the backlight of the screen to make sure the user turns off the device
+		G_power_run_counter++;
+		//if (G_power_run_counter > 5 and btn.state() == 0) digitalWrite(ENABLE_GPIO, LOW); //suicide a second later, so that the user is sure to release the button
+		if (G_power_run_counter > 15 and btn.state() == 0) ESP.restart(); //Тестовая схема для отладки
+
+	}
+
+	if (G_power_run_counter == 0) G_power_run_counter++;
+}
 
 
 void draw_asset(const asset_t *asset, uint8_t x, uint8_t y) {
@@ -1043,7 +1067,7 @@ void term_data_print() {
   Serial.println((String)F("SDK Version: \t\t\t")+system_get_sdk_version()+F(""));
 	Serial.println((String)F("CPU frequency: \t\t\t")+system_get_cpu_freq()+F(" MHz"));
 
-	Serial.print((String)F("Flash ID/Vendor ID: \t\t\t0x"));
+	Serial.print((String)F("Flash ID/Vendor ID: \t\t0x"));
 	Serial.print(ESP.getFlashChipId(), HEX);
 	Serial.print((String)F("/"));
 	Serial.print(ESP.getFlashChipVendorId(), HEX);
@@ -1175,10 +1199,8 @@ void setup(void) {
 	WiFi.forceSleepBegin(); //Disable radio module
 	Serial.print(F("Wifi disabled\n"));
 
-	pinMode(ST7735_TFT_BACKLIGHT, OUTPUT);
-	//pinMode(ENABLE_GPIO, OUTPUT);
 
-	digitalWrite(ST7735_TFT_BACKLIGHT, LOW);
+	//pinMode(ENABLE_GPIO, OUTPUT);
 	//digitalWrite(ENABLE_GPIO, HIGH);
 
 	//attachInterrupt(BUTTON_GPIO, isr, CHANGE); //button interrupt
@@ -1194,14 +1216,16 @@ void setup(void) {
 	Serial.print(F("Light sensor initialized\n"));
 
 	eeprom_init();
-	Serial.print(F("EEPROM init\n"));
+	Serial.print(F("EEPROM initialized\n"));
 
 
+	pinMode(ST7735_TFT_BACKLIGHT, OUTPUT);
+	digitalWrite(ST7735_TFT_BACKLIGHT, LOW);
   framebuffer.initR(INITR_BLACKTAB);
 	framebuffer.cp437(true); //Support for сyrillic in the standard font (works with the patched glcdfont.c)
 	//framebuffer.fillScreen(ST7735_TFT_BLACK);
 	//framebuffer.display();
-	Serial.print(F("Framebuffer initialized\n"));
+	Serial.print(F("Display & framebuffer initialized\n"));
 
 
 	term_init();
@@ -1216,6 +1240,7 @@ void setup(void) {
 	ts.add(TS_RENDER_SHUTDOWN, 		  60,  [&](void *) { shutdown_screen_render(); 	  	}, nullptr, false);
 	ts.add(TS_RENDER_CAL_HELP, 		  80,  [&](void *) { calibration_help_render(); 		}, nullptr, false);
 	ts.add(TS_RENDER_CAL_PROCESS,  200,  [&](void *) { calibration_measure_render(); 	}, nullptr, false);
+	ts.add(TS_POWER,  						 100,  [&](void *) { power_process(); 							}, nullptr, false);
 
 	ts.disableAll();
 	Serial.print(F("Sheduler initialized\n"));

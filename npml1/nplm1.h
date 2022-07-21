@@ -23,6 +23,7 @@ typedef enum: uint8_t {
 	TS_RENDER_CAL_PROCESS,
 	TS_DEBUG,
 	TS_MEM_TEST,
+	TS_POWER,
 	TS_MAX,
 } TASKS;
 
