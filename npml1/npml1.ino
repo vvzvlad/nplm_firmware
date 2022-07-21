@@ -753,7 +753,7 @@ void calibration_help_render() {
 	if (counter >= text_pixel_diff) G_cal_help_text_y--;
 	if (G_cal_help_counter > text_pixel_diff*2) G_cal_help_counter = 0;
 
-	uint8_t easter = 1;
+	uint8_t easter = 0;
 	if (easter == 1){
 		draw_asset(&cal_help_screen_easter, 0, 0);
 		draw_asset(&cal_help_screen_msg_easter, 0, G_cal_help_text_y);
@@ -1190,7 +1190,7 @@ void eeprom_clear() {
 
 void setup(void) {
 	Serial.begin(115200);
-	delay(100);
+	delay(100); //Delay for the development console to open on the computer
   Serial.print(F("\n\nNPLM-1 Start\n"));
 
 	WiFi.persistent(false); //Disable wifi settings recording in flash
