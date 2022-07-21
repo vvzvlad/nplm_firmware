@@ -1070,8 +1070,8 @@ void term_data_print() {
 	Serial.print((String)F("\n"));
 
 	Serial.println((String)F("Flash real size: \t\t")+ESP.getFlashChipRealSize()/1024+F(" kbytes"));
-	Serial.println((String)F("Flash size: \t\t\t")+ESP.getFlashChipSize()/1024+F(" kbytes"));
-	Serial.println((String)F("Flash size(chipid): \t\t")+ESP.getFlashChipSizeByChipId()/1024+F(" kbytes"));
+	Serial.println((String)F("Flash size: \t\t\t")+ESP.getFlashChipSize()/8/1024+F(" kbytes"));
+	Serial.println((String)F("Flash size(chipid): \t\t")+ESP.getFlashChipSizeByChipId()/8/1024+F(" kbytes"));
 	Serial.println((String)F("Flash speed: \t\t\t")+ESP.getFlashChipSpeed()/1000/1000+F(" MHz"));
 
 	Serial.println((String)F("App size (flash): \t\t")+ESP.getSketchSize()/1024+F(" kbytes"));
