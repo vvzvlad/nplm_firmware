@@ -1191,11 +1191,10 @@ void setup(void) {
 	WiFi.forceSleepBegin(); //Disable radio module
 	Serial.print(F("Wifi disabled\n"));
 
+	pinMode(ENABLE_GPIO, OUTPUT);
+	digitalWrite(ENABLE_GPIO, HIGH);
 
-	//pinMode(ENABLE_GPIO, OUTPUT);
-	//digitalWrite(ENABLE_GPIO, HIGH);
-
-	//attachInterrupt(BUTTON_GPIO, isr, CHANGE); //button interrupt
+	attachInterrupt(BUTTON_GPIO, isr, CHANGE); //button interrupt
 	btn.setButtonLevel(HIGH);
 	btn.setHoldTimeout(400);
 	btn.attach(CLICK_HANDLER, button_click_handler);
