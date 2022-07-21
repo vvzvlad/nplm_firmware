@@ -26,7 +26,7 @@ git_commit:
 	@echo "Git commit&push..."
 	@git add . > /dev/null
 	@git commit -m "Auto(build ok): `date +'%Y-%m-%d %H:%M:%S'`"  > /dev/null
-	@git remote | xargs -L1 git push --all > /dev/null &
+	@git remote | xargs -L1 git push --all > /dev/null 2>&1 &
 
 git_commit_wait:
 	@echo "-----> Press enter for NOT git commit & push within 4 seconds <-----"
