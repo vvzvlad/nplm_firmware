@@ -1112,7 +1112,7 @@ void term_data_print() {
 	Serial.println((String)F("App running: \t\t\tenum APP #")+G_app_runned+F(""));
 	Serial.println((String)F("Last app (eeprom): \t\tenum APP #")+EEPROM.read(EEPROM_LAST_APP)+F(""));
 	Serial.println((String)F("First run flag: \t\t")+G_flag_first_run+F(""));
-	Serial.println((String)F("Calibration disable (eeprom): \t")+EEPROM.read(EEPROM_CALIBRATION_ACTIVE)+F(""));
+	Serial.println((String)F("Calibration flag (eeprom): \t")+EEPROM.read(EEPROM_CALIBRATION_ACTIVE)+F(""));
 	free_mem_calc();
 }
 
