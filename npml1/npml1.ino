@@ -540,7 +540,6 @@ void luminance_render() {
 	}
 
 	framebuffer.display();
-	digitalWrite(ST7735_TFT_BACKLIGHT, HIGH); //backlight on
 	free_mem_calc();
 }
 
@@ -809,16 +808,11 @@ void flicker_render() {
 
 	//------ Transfer image to display ------
 	framebuffer.display();
-	digitalWrite(ST7735_TFT_BACKLIGHT, HIGH); //backlight on
 	free_mem_calc();
 }
 
 void boot_screen_render() {
 	uint8_t counter = G_boot_run_counter++; //local counter value before increment
-
-	if (counter > 1){ // 200ms*10cycles=2000ms
-		digitalWrite(ST7735_TFT_BACKLIGHT, HIGH); //backlight on
-	}
 
 	if (counter < 10){ // 200ms*10cycles=2000ms
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
@@ -875,7 +869,6 @@ void calibration_help_render() {
 
 
 	framebuffer.display();
-	digitalWrite(ST7735_TFT_BACKLIGHT, HIGH); //backlight on
 	free_mem_calc();
 }
 
@@ -895,7 +888,6 @@ void calibration_measure_render() {
 		framebuffer.setCursor(10, 120);
 		framebuffer.print((String)"Value:"+G_adc_correction+" adc p.");
 		framebuffer.display();
-		digitalWrite(ST7735_TFT_BACKLIGHT, HIGH); //backlight on
 	}
 	else {
 		framebuffer.fillScreen(ST7735_TFT_BLACK);
@@ -963,7 +955,7 @@ void shutdown_screen_render() {
 
 void power_process() {
 	if (G_power_flag == F_ACTIVE){
-		if (G_power_run_counter > 0) {
+		if (G_power_run_counter > 1) {
 			digitalWrite(ST7735_TFT_BACKLIGHT, HIGH); 	//Turn on the backlight with a delay so that the screen does not show transients and initialization
 		}
 		digitalWrite(ENABLE_GPIO, HIGH); 						//After booting up the system, maintain the high level on the ENABLE LDO by itself
@@ -978,7 +970,7 @@ void power_process() {
 
 	}
 
-	if (G_power_run_counter == 0) G_power_run_counter++;
+	if (G_power_run_counter < 2) G_power_run_counter++;
 }
 
 
