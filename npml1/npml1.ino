@@ -115,7 +115,7 @@ volatile uint8_t G_power_run_counter = 0;
 volatile uint32_t G_time_without_buttons_ms = 0;
 
 volatile uint8_t G_cal_help_counter = 0;
-volatile uint8_t G_cal_help_text_y = 100;
+volatile uint8_t G_cal_help_text_y = 0;
 
 volatile uint16_t G_luminance = 0;
 volatile uint16_t G_eeprom_luminance_normal_point = LUMINANCE_NORMAL;
@@ -745,6 +745,8 @@ void boot_screen_render() {
 
 void calibration_help_render() {
 	uint8_t counter = G_cal_help_counter++; //local counter value before increment
+
+	if (counter == 0) G_cal_help_text_y = 80;
 
 	uint8_t text_pixel_diff = 8;
 	if (counter <= text_pixel_diff) G_cal_help_text_y++;
