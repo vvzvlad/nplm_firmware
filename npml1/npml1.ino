@@ -23,8 +23,6 @@
 
 #include <ArduinoOTA.h>
 #include <ESP8266httpUpdate.h>
-#include <GDBStub.h>
-
 
 //Debug: Serial.println(__LINE__);
 // Serial.print((String)__LINE__+": "+target_app+"\n");
@@ -1191,7 +1189,6 @@ void eeprom_clear() {
 
 void setup(void) {
 	Serial.begin(115200);
-	gdbstub_init();
 	delay(100); //Delay for the development console to open on the computer
   Serial.print(F("\n\nNPLM-1 Start\n"));
 
