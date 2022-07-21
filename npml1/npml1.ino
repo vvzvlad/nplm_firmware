@@ -74,6 +74,8 @@
 
 #define EEPROM_SIZE 		  			100
 
+#define AUTOPOWEROFF_TIME_S 		120
+
 #define LUMINANCE_NORMAL 				200
 #define LUMINANCE_GOOD 					300
 
@@ -108,6 +110,7 @@ volatile uint8_t G_boot_run_counter = 0;
 volatile uint8_t G_cal_run_counter = 0;
 volatile uint8_t G_shutdown_run_counter = 0;
 volatile uint8_t G_power_run_counter = 0;
+volatile uint32_t G_time_without_buttons_ms = 0;
 
 volatile uint8_t G_cal_help_counter = 0;
 volatile uint8_t G_cal_help_text_y = 100;
@@ -321,102 +324,6 @@ void luminance_measure() {
 	if (lum_value < 2) 			graph_lum_value = 1;
 	else 										graph_lum_value = (uint8_t)(log2(lum_value)/log2(1.24));
 	lum_graph_buf_log.write(graph_lum_value);
-
-	free_mem_calc();
-}
-
-
-//----------Switch app function----------//
-
-void change_app(APPS target_app){
-	if (G_app_runned == target_app) {return;}
-
-	if (target_app == APP_FLICKER_SIMPLE || target_app == APP_FLICKER_GOST || target_app == APP_LIGHT) {
-		EEPROM.put(EEPROM_LAST_APP, target_app); EEPROM.commit();
-		if (G_eeprom_last_app != APP_UNKNOWN && G_flag_first_run == F_ACTIVE) {
-			target_app = G_eeprom_last_app;
-			G_flag_first_run = F_INACTIVE;
-		}
-	}
-
-	G_app_previous = G_app_runned;
-	G_app_runned = target_app;
-	ts.disableAll();
-	ts.enable(TS_MEASURE_FLICKER); //To quickly update the values when switching
-	ts.enable(TS_MEASURE_LIGHT);   //applications, the metering processes is always on
-	ts.enable(TS_POWER);   				 //This process is always on
-
-	if (target_app == APP_FLICKER_SIMPLE) {
-		G_F_type = FT_SIMPLE;
-		ts.enable(TS_RENDER_FLICKER);
-		Serial.print(F("Run APP_FLICKER_SIMPLE app\n")); term_prompt();
-		return;
-	}
-
-	if (target_app == APP_FLICKER_GOST) {
-		G_F_type = FT_GOST;
-		ts.enable(TS_RENDER_FLICKER);
-		Serial.print(F("Run APP_FLICKER_GOST app\n")); term_prompt();
-		return;
-	}
-
-	if (target_app == APP_LIGHT) {
-		ts.enable(TS_RENDER_LIGHT);
-		Serial.print(F("Run APP_LIGHT app\n")); term_prompt();
-		return;
-	}
-
-	if (target_app == APP_BOOT) {
-		ts.enable(TS_RENDER_BOOT);
-		Serial.print(F("Run APP_BOOT app\n")); term_prompt();
-		return;
-	}
-
-	if (target_app == APP_CAL_HELP) {
-		ts.enable(TS_RENDER_CAL_HELP);
-		Serial.print(F("Run APP_CAL_HELP app\n")); term_prompt();
-		return;
-	}
-
-	if (target_app == APP_CAL_MEASURE) {
-		ts.enable(TS_RENDER_CAL_PROCESS);
-		Serial.print(F("Run APP_CAL_MEASURE app\n")); term_prompt();
-		return;
-	}
-
-	if (target_app == APP_SHUTDOWN) {
-		ts.enable(TS_RENDER_SHUTDOWN);
-		Serial.print(F("Run APP_SHUTDOWN app\n")); term_prompt();
-		return;
-	}
-}
-
-//----------Button processing functions----------//
-
-void button_click_handler() { //Switch applications cyclically at the touch of a button
-	Serial.print(F("Click\n"));
-	term_prompt();
-
-	if 			(G_app_runned == APP_FLICKER_SIMPLE) 	change_app(APP_LIGHT); 						//clicking the button switching FLIKER_SIMPLE->LIGHT
-	else if (G_app_runned == APP_LIGHT) 					change_app(APP_FLICKER_GOST);			//clicking the button switching LIGHT->FLIKER_GOST
-	else if (G_app_runned == APP_FLICKER_GOST) 		change_app(APP_FLICKER_SIMPLE);		//clicking the button switching FLIKER_GOST->FLICKER_SIMPLE
-
-	else if (G_app_runned == APP_BOOT) 						change_app(APP_FLICKER_SIMPLE);		//clicking the button will skip the screen and calibration
-	else if (G_app_runned == APP_CAL_HELP) 				change_app(APP_CAL_MEASURE); 			//clicking the button starts the calibration(APP_CAL_MEASURE, calibration_measure_render)
-	else 																					change_app(APP_SHUTDOWN); 				//strange behavior, fall down paws upwards
-	free_mem_calc();
-}
-
-void button_holded_handler() { //A long press to turn device off
-  Serial.print(F("Holded\n"));
-	term_prompt();
-
-	if 			(G_app_runned == APP_FLICKER_GOST) 		change_app(APP_SHUTDOWN); 				//power off
-	else if (G_app_runned == APP_FLICKER_SIMPLE) 	change_app(APP_SHUTDOWN);					//power off
-	else if (G_app_runned == APP_LIGHT) 					change_app(APP_SHUTDOWN);					//power off
-	else if (G_app_runned == APP_CAL_HELP) 				change_app(APP_FLICKER_SIMPLE); 	//holding the button skips the calibration
-	else if (G_app_runned == APP_CAL_MEASURE) 		change_app(APP_FLICKER_SIMPLE); 	//holding the button skips the calibration
-	else 																					change_app(APP_SHUTDOWN); 				//strange behavior, fall down paws upwards
 
 	free_mem_calc();
 }
@@ -950,10 +857,119 @@ void shutdown_screen_render() {
 }
 
 
+//----------Switch app function----------//
+
+void change_app(APPS target_app){
+	if (G_app_runned == target_app) {return;}
+
+	if (target_app == APP_FLICKER_SIMPLE || target_app == APP_FLICKER_GOST || target_app == APP_LIGHT) { //TODO сделать LAST_APP
+		EEPROM.put(EEPROM_LAST_APP, target_app); EEPROM.commit();
+		if (G_eeprom_last_app != APP_UNKNOWN && G_flag_first_run == F_ACTIVE) {
+			target_app = G_eeprom_last_app;
+			G_flag_first_run = F_INACTIVE;
+		}
+	}
+
+	G_app_previous = G_app_runned;
+	G_app_runned = target_app;
+	ts.disableAll();
+	ts.enable(TS_MEASURE_FLICKER); //To quickly update the values when switching
+	ts.enable(TS_MEASURE_LIGHT);   //applications, the metering processes is always on
+	ts.enable(TS_POWER);   				 //This process is always on
+
+	if (target_app == APP_FLICKER_SIMPLE) {
+		G_F_type = FT_SIMPLE;
+		ts.enable(TS_RENDER_FLICKER);
+		Serial.print(F("Run APP_FLICKER_SIMPLE app\n")); term_prompt();
+		return;
+	}
+
+	if (target_app == APP_FLICKER_GOST) {
+		G_F_type = FT_GOST;
+		ts.enable(TS_RENDER_FLICKER);
+		Serial.print(F("Run APP_FLICKER_GOST app\n")); term_prompt();
+		return;
+	}
+
+	if (target_app == APP_LIGHT) {
+		ts.enable(TS_RENDER_LIGHT);
+		Serial.print(F("Run APP_LIGHT app\n")); term_prompt();
+		return;
+	}
+
+	if (target_app == APP_BOOT) {
+		ts.enable(TS_RENDER_BOOT);
+		Serial.print(F("Run APP_BOOT app\n")); term_prompt();
+		return;
+	}
+
+	if (target_app == APP_CAL_HELP) {
+		ts.enable(TS_RENDER_CAL_HELP);
+		Serial.print(F("Run APP_CAL_HELP app\n")); term_prompt();
+		return;
+	}
+
+	if (target_app == APP_CAL_MEASURE) {
+		ts.enable(TS_RENDER_CAL_PROCESS);
+		Serial.print(F("Run APP_CAL_MEASURE app\n")); term_prompt();
+		return;
+	}
+
+	if (target_app == APP_SHUTDOWN) {
+		ts.enable(TS_RENDER_SHUTDOWN);
+		Serial.print(F("Run APP_SHUTDOWN app\n")); term_prompt();
+		return;
+	}
+}
+
+//----------Button processing functions----------//
+
+void button_click_handler() { //Switch applications cyclically at the touch of a button
+	Serial.print(F("Click\n"));
+	term_prompt();
+
+	if 			(G_app_runned == APP_FLICKER_SIMPLE) 	change_app(APP_LIGHT); 						//clicking the button switching FLIKER_SIMPLE->LIGHT
+	else if (G_app_runned == APP_LIGHT) 					change_app(APP_FLICKER_GOST);			//clicking the button switching LIGHT->FLIKER_GOST
+	else if (G_app_runned == APP_FLICKER_GOST) 		change_app(APP_FLICKER_SIMPLE);		//clicking the button switching FLIKER_GOST->FLICKER_SIMPLE
+
+	else if (G_app_runned == APP_BOOT) 						change_app(APP_FLICKER_SIMPLE);		//clicking the button will skip the screen and calibration
+	else if (G_app_runned == APP_CAL_HELP) 				change_app(APP_CAL_MEASURE); 			//clicking the button starts the calibration(APP_CAL_MEASURE, calibration_measure_render)
+	else 																					change_app(APP_SHUTDOWN); 				//strange behavior, fall down paws upwards
+
+	G_time_without_buttons_ms = 0; //Autopower off timer reset
+	free_mem_calc();
+}
+
+void button_holded_handler() { //A long press to turn device off
+  Serial.print(F("Holded\n"));
+	term_prompt();
+
+	if 			(G_app_runned == APP_FLICKER_GOST) 		change_app(APP_SHUTDOWN); 				//power off
+	else if (G_app_runned == APP_FLICKER_SIMPLE) 	change_app(APP_SHUTDOWN);					//power off
+	else if (G_app_runned == APP_LIGHT) 					change_app(APP_SHUTDOWN);					//power off
+	else if (G_app_runned == APP_BOOT)					 	change_app(APP_FLICKER_SIMPLE);		//holding the button skips the calibration
+	else if (G_app_runned == APP_CAL_HELP) 				change_app(APP_FLICKER_SIMPLE); 	//holding the button skips the calibration
+	else if (G_app_runned == APP_CAL_MEASURE) 		change_app(APP_FLICKER_SIMPLE); 	//holding the button skips the calibration
+	else 																					change_app(APP_SHUTDOWN); 				//strange behavior, fall down paws upwards
+
+	G_time_without_buttons_ms = 0; //Autopower off timer reset
+	free_mem_calc();
+}
+
+
+
 
 //----------System functions----------//
 
 void power_process() {
+	G_time_without_buttons_ms = 0 G_time_without_buttons_ms+100;
+
+	if (G_time_without_buttons_ms/1000 > AUTOPOWEROFF_TIME_S){
+		Serial.print(F("Auto timer shutdown\n"));
+		term_prompt();
+		G_power_flag = F_INACTIVE;
+	}
+
 	if (G_power_flag == F_ACTIVE){
 		if (G_power_run_counter > 1) {
 			digitalWrite(ST7735_TFT_BACKLIGHT, HIGH); 	//Turn on the backlight with a delay so that the screen does not show transients and initialization
