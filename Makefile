@@ -23,9 +23,10 @@ upload_fast:
 	@~/Library/Arduino15/packages/esp8266/tools/python3/3.7.2-post1/python3 -I /Users/vvzvlad/Library/Arduino15/packages/esp8266/hardware/esp8266/3.0.2/tools/upload.py --chip esp8266 --port /dev/tty.usbserial* --baud 3000000 --before default_reset --after hard_reset write_flash 0x0 ./bin/npml1.ino.bin
 
 git_commit:
-	git add . > /dev/null 2>&1
-	git commit -m "Auto(build ok): `date +'%Y-%m-%d %H:%M:%S'`"  > /dev/null 2>&1
-	git remote | xargs -L1 git push --all > /dev/null 2>&1 &
+	@echo "Git commit&push..."
+	@git add . > /dev/null
+	@git commit -m "Auto(build ok): `date +'%Y-%m-%d %H:%M:%S'`"  > /dev/null
+	@git remote | xargs -L1 git push --all > /dev/null &
 
 git_commit_wait:
 	@echo "-----> Press enter for NOT git commit & push within 4 seconds <-----"
@@ -40,7 +41,7 @@ exeption_decode:
 
 assets_convert:
 	@echo "Convert assets..."
-	@python3 ./common/rgb565_converter.py --input ./assets --output ./libraries/assets/images.h  > /dev/null 2>&1
+	@python3 ./common/rgb565_converter.py --input ./assets --output ./libraries/assets/images.h  > /dev/null
 
 clean:
 	arduino-cli cache clean
