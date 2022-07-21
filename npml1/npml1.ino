@@ -988,7 +988,7 @@ void free_mem_calc() {
 }
 
 
-void isr() {
+void ICACHE_RAM_ATTR isr() {
   btn.tickISR();
 }
 
