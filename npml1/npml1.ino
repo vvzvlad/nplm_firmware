@@ -15,7 +15,7 @@
 
 #include <TickerScheduler.h>				// Scheduler library
 
-#define EB_CLICK 200   							// EncButton clicks timeout
+#define EB_CLICK 400   							// EncButton clicks timeout
 #include <EncButton.h> 							// Button library
 
 #include <GyverFilters.h>						// Filters library
@@ -916,7 +916,7 @@ void change_app(APPS target_app){
 
 void button_clicks_handler() {
   Serial.print("CLICKS_HANDLER: ");
-  Serial.println(enc.clicks);
+  Serial.println(btn.clicks);
 }
 
 void button_click_handler() { //Switch applications cyclically at the touch of a button
@@ -1212,7 +1212,7 @@ void setup(void) {
 	btn.setHoldTimeout(400);
 	btn.attach(CLICK_HANDLER, button_click_handler);
 	btn.attach(HOLDED_HANDLER, button_holded_handler);
-	enc.attach(CLICKS_HANDLER, button_clicks_handler);
+	btn.attach(CLICKS_HANDLER, button_clicks_handler);
 	Serial.print(F("Buttons triggers attach\n"));
 
   LightSensor.begin();
