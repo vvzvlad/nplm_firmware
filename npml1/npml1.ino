@@ -14,6 +14,8 @@
 #include <BH1750FVI.h> 							// Brightness sensor library
 
 #include <TickerScheduler.h>				// Scheduler library
+
+#define EB_CLICK 200   							// EncButton clicks timeout
 #include <EncButton.h> 							// Button library
 
 #include <GyverFilters.h>						// Filters library
@@ -464,7 +466,7 @@ void ota_update() {
 	Serial.printf("Wi-Fi mode set to WIFI_STA %s\n", WiFi.mode(WIFI_STA) ? "" : "Failed!");
 
   WiFi.begin("IoT_Dobbi", "canned-ways-incense");
-	while (WiFi.status() != WL_CONNECTED)
+	while (WiFi.status() != WL_CONNECTED) //TODO нужен счетчик максимальных попыток
   {
     switch ( WiFi.status() ) {
 			case 0: Serial.print(F("Status 0: WL_IDLE_STATUS (Wi-Fi is in process of changing between statuses)\n")); break;
@@ -912,6 +914,11 @@ void change_app(APPS target_app){
 
 //----------Button processing functions----------//
 
+void button_clicks_handler() {
+  Serial.print("CLICKS_HANDLER: ");
+  Serial.println(enc.clicks);
+}
+
 void button_click_handler() { //Switch applications cyclically at the touch of a button
 	Serial.print(F("Click\n"));
 	term_prompt();
@@ -1205,8 +1212,7 @@ void setup(void) {
 	btn.setHoldTimeout(400);
 	btn.attach(CLICK_HANDLER, button_click_handler);
 	btn.attach(HOLDED_HANDLER, button_holded_handler);
-	//btn.attach(CLICKS_HANDLER, myClicks);
-  //btn.attachClicks(5, fiveClicks);
+	enc.attach(CLICKS_HANDLER, button_clicks_handler);
 	Serial.print(F("Buttons triggers attach\n"));
 
   LightSensor.begin();
