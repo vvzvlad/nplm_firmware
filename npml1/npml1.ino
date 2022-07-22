@@ -914,8 +914,8 @@ void change_app(APPS target_app){
 
 //----------Button processing functions----------//
 
-void button_clicks_handler() {
-  Serial.print("CLICKS_HANDLER: ");
+void button_two_clicks_handler() {
+  Serial.print("2CLICKS_HANDLER: ");
   Serial.println(btn.clicks);
 }
 
@@ -1212,7 +1212,8 @@ void setup(void) {
 	btn.setHoldTimeout(400);
 	btn.attach(CLICK_HANDLER, button_click_handler);
 	btn.attach(HOLDED_HANDLER, button_holded_handler);
-	btn.attach(CLICKS_HANDLER, button_clicks_handler);
+	//btn.attach(CLICKS_HANDLER, button_clicks_handler);
+	btn.attachClicks(2, button_two_clicks_handler);
 	Serial.print(F("Buttons triggers attach\n"));
 
   LightSensor.begin();
