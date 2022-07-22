@@ -1260,5 +1260,6 @@ void setup(void) {
 void loop() {
   ts.update();
 	btn.tick();
+	ts.update();
 	term.readSerial();
 }
