@@ -976,8 +976,8 @@ void power_process() {
 	if (G_power_flag == F_INACTIVE){
 		digitalWrite(ST7735_TFT_BACKLIGHT, LOW); 											//Turn off the backlight of the screen to make sure the user turns off the device
 		G_power_run_counter++;
-		//if (G_power_run_counter > 5 and btn.state() == 0) digitalWrite(ENABLE_GPIO, LOW); //suicide a second later, so that the user is sure to release the button
-		if (G_power_run_counter > 15 and btn.state() == 0) ESP.restart(); //Тестовая схема для отладки
+		if (G_power_run_counter > 5 and btn.state() == 0) digitalWrite(ENABLE_GPIO, LOW); //suicide a second later, so that the user is sure to release the button
+		//if (G_power_run_counter > 15 and btn.state() == 0) ESP.restart(); //Тестовая схема для отладки
 
 	}
 
