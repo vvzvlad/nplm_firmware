@@ -20,7 +20,7 @@ upload:
 
 upload_fast:
 	@echo "Upload ./bin/npml1.ino.bin..."
-	@~/Library/Arduino15/packages/esp8266/tools/python3/3.7.2-post1/python3 -I /Users/vvzvlad/Library/Arduino15/packages/esp8266/hardware/esp8266/3.0.2/tools/upload.py --chip esp8266 --port /dev/tty.usbserial* --baud 3000000 --before default_reset --after hard_reset write_flash 0x0 ./bin/npml1.ino.bin
+	@~/Library/Arduino15/packages/esp8266/tools/python3/3.7.2-post1/python3 -I ~/Library/Arduino15/packages/esp8266/hardware/esp8266/3.0.2/tools/upload.py --chip esp8266 --port /dev/tty.usbserial* --baud 3000000 --before default_reset --after hard_reset write_flash 0x0 ./bin/npml1.ino.bin
 
 git_commit:
 	@echo "Git commit&push..."
